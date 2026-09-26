@@ -51,7 +51,7 @@ func TestColetarFluxoCompleto(t *testing.T) {
 	defer pageSpeed.Close()
 
 	buscaPorTermo := map[string][]string{
-		"confeitaria em Manaíra, João Pessoa - PB": {"id-C", "id-A", "id-D"},
+		"confeitaria em Manaíra, João Pessoa - PB": {"id-C", "id-F", "id-A", "id-D"},
 		"doceria em Manaíra, João Pessoa - PB":     {"id-A", "id-B", "id-E"},
 	}
 	detalheChamadas := map[string]int{}
@@ -84,6 +84,10 @@ func TestColetarFluxoCompleto(t *testing.T) {
 			return
 		}
 		detalheChamadas[id]++
+		if id == "id-F" { // detalhar de um lugar isolado falha (500): não pode derrubar a coleta inteira
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		fmt.Fprint(w, detalheJSON(id, siteProprio.URL))
 	}))
 	defer placesSrv.Close()
@@ -125,8 +129,8 @@ func TestColetarFluxoCompleto(t *testing.T) {
 	if _, tocou := detalheChamadas["id-E"]; tocou {
 		t.Errorf("id-E foi detalhado; limite=2 já tinha sido atingido em id-A e id-B")
 	}
-	if len(detalheChamadas) != 4 {
-		t.Errorf("detalheChamadas = %v, want 4 ids (C, A, D, B)", detalheChamadas)
+	if len(detalheChamadas) != 5 {
+		t.Errorf("detalheChamadas = %v, want 5 ids (C, F, A, D, B)", detalheChamadas)
 	}
 
 	// lugar fechado (id-C) ou sem celular (id-D) não gastam avaliação: só quem passou no porte (A, B) gasta.
@@ -137,16 +141,23 @@ func TestColetarFluxoCompleto(t *testing.T) {
 		t.Errorf("conta.Atmosfera = %d, want 2 (nº de quem passou no porte)", conta.Atmosfera)
 	}
 
-	// descartes: id-C (fechado) e id-D (sem celular), nenhuma avaliação gasta com eles.
-	if len(descartes) != 2 {
-		t.Fatalf("descartes = %+v, want 2", descartes)
+	// descartes: id-C (fechado), id-F (erro no Detalhar) e id-D (sem celular); nenhuma avaliação gasta com eles.
+	if len(descartes) != 3 {
+		t.Fatalf("descartes = %+v, want 3", descartes)
 	}
-	motivos := map[string]string{descartes[0].Nome: descartes[0].Motivo, descartes[1].Nome: descartes[1].Motivo}
+	motivos := map[string]string{}
+	for _, d := range descartes {
+		motivos[d.Nome] = d.Motivo
+	}
 	if motivos["Confeitaria Fechada"] != "fechado" {
 		t.Errorf("motivo de Confeitaria Fechada = %q, want fechado", motivos["Confeitaria Fechada"])
 	}
 	if motivos["Confeitaria Sem Celular"] != "sem celular" {
 		t.Errorf("motivo de Confeitaria Sem Celular = %q, want \"sem celular\"", motivos["Confeitaria Sem Celular"])
+	}
+	// id-F: Detalhar falhou (500) antes de sabermos o nome do lugar; o descarte usa o place ID.
+	if !strings.HasPrefix(motivos["id-F"], "erro:") {
+		t.Errorf("motivo de id-F = %q, want prefixo \"erro:\" (falha isolada não derruba a coleta)", motivos["id-F"])
 	}
 
 	// leads qualificados: A e B, ordenados por pontuação (A tem mais avaliações e nota maior).

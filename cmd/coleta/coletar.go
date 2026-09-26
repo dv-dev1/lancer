@@ -65,7 +65,10 @@ func coletar(ctx context.Context, pl *places.Cliente, sc *site.Checador, lc *llm
 
 		lugar, err := pl.Detalhar(ctx, id)
 		if err != nil {
-			return nil, nil, err
+			// falha num lugar isolado (deletado, blip de rede) não pode derrubar a coleta inteira;
+			// só a busca de IDs (acima) é sistêmica o bastante pra abortar.
+			descartes = append(descartes, descarte{id, fmt.Sprintf("erro: %v", err)})
+			continue
 		}
 		if lugar.Status != "OPERATIONAL" {
 			descartes = append(descartes, descarte{lugar.Nome, "fechado"})
@@ -89,11 +92,13 @@ func coletar(ctx context.Context, pl *places.Cliente, sc *site.Checador, lc *llm
 
 		avaliacoes, err := pl.Avaliacoes(ctx, lugar.ID)
 		if err != nil {
-			return nil, nil, err
+			descartes = append(descartes, descarte{lugar.Nome, fmt.Sprintf("erro: %v", err)})
+			continue
 		}
 		saida, err := lc.Analisar(ctx, llm.Entrada{Nicho: e.Nicho, Dores: detalhes, Avaliacoes: avaliacoes})
 		if err != nil {
-			return nil, nil, err
+			descartes = append(descartes, descarte{lugar.Nome, fmt.Sprintf("erro: %v", err)})
+			continue
 		}
 		if saida.Reclamacao != "" {
 			dores = append(dores, lead.Reclamacao)
