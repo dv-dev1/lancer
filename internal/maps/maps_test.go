@@ -53,20 +53,16 @@ const paginaBusca = `<html><body><div role="feed">
 
 const paginaCaptcha = `<html><body><p>Nossos sistemas detectaram tráfego incomum vindo da sua rede.</p></body></html>`
 
-// paginaLugar monta o fixture do lugar: completo tem telefone e site, sem site não tem o data-item-id authority.
-func paginaLugar(comSite bool) string {
+// paginaLugar monta o fixture do lugar: completo tem telefone e site, sem site não tem o data-item-id
+// authority, sem aba modela a visão signed-out reduzida (só "Visão geral"/"Sobre", achada ao vivo
+// no fix round 3: nenhuma aba Avaliações, nenhum sinal de contagem em lugar nenhum da página).
+func paginaLugar(comSite, comAba bool) string {
 	site := `<a data-item-id="authority" href="https://exemplo.com.br">exemplo.com.br</a>`
 	if !comSite {
 		site = ""
 	}
-	return `<html><body>
-  <h1>Confeitaria Teste</h1>
-  <span role="img" aria-label="4,5 estrelas">4,5</span>
-  <button data-item-id="phone:tel:083991355466">(83) 99135-5466</button>
-  ` + site + `
-  <button data-item-id="address" aria-label="Endereço: Rua das Flores, 100 - Manaíra">Rua das Flores, 100</button>
+	aba := `
   <button role="tab" aria-label="Avaliações">Avaliações</button>
-  <!-- sem contagem na visão geral: signed-out o Google só mostra no histograma, abaixo -->
   <div>
     <span aria-label="5 estrelas, 206 avaliações"></span>
     <span aria-label="4 estrelas, 38 avaliações"></span>
@@ -90,7 +86,17 @@ Mais</span></div>
     <div data-review-id="r3"><span aria-label="1 estrela">1 estrela</span><span lang="pt">Atendimento péssimo</span></div>
     <div data-review-id="r2"><span aria-label="2 estrelas">2 estrelas</span><span lang="pt">Demorou muito para o pedido chegar…
 Mais</span></div>
-  </div>
+  </div>`
+	if !comAba {
+		aba = `<button role="tab" aria-label="Sobre">Sobre</button>`
+	}
+	return `<html><body>
+  <h1>Confeitaria Teste</h1>
+  <span role="img" aria-label="4,5 estrelas">4,5</span>
+  <button data-item-id="phone:tel:083991355466">(83) 99135-5466</button>
+  ` + site + `
+  <button data-item-id="address" aria-label="Endereço: Rua das Flores, 100 - Manaíra">Rua das Flores, 100</button>
+  ` + aba + `
 </body></html>`
 }
 
@@ -100,7 +106,9 @@ func novoServidorFixture() *httptest.Server {
 		w.Write([]byte(paginaBusca))
 	})
 	mux.HandleFunc("/maps/place/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(paginaLugar(!strings.Contains(r.URL.RawQuery, "semsite"))))
+		comSite := !strings.Contains(r.URL.RawQuery, "semsite")
+		comAba := !strings.Contains(r.URL.RawQuery, "semaba")
+		w.Write([]byte(paginaLugar(comSite, comAba)))
 	})
 	mux.HandleFunc("/sorry/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(paginaCaptcha))
@@ -116,6 +124,7 @@ func TestColetorComFixture(t *testing.T) {
 	// waits curtos só no teste: a produção precisa do tempo real pro Google carregar assíncrono.
 	esperaAposClique = 200 * time.Millisecond
 	esperaAposRolagem = 200 * time.Millisecond
+	timeoutElemento = 500 * time.Millisecond // senão "lugar sem aba" esperaria os 15s de produção
 
 	srv := novoServidorFixture()
 	defer srv.Close()
@@ -221,6 +230,27 @@ func TestColetorComFixture(t *testing.T) {
 		}
 	})
 
+	t.Run("lugar sem aba de avaliações", func(t *testing.T) {
+		lugar, err := c.Abrir(ctx, srv.URL+"/maps/place/x?semaba=1")
+		if err != nil {
+			t.Fatalf("Abrir: %v", err)
+		}
+		if lugar.Avaliacoes != -1 {
+			t.Errorf("Avaliacoes = %v, want -1", lugar.Avaliacoes)
+		}
+		if lugar.Nome != "Confeitaria Teste" || lugar.Telefone != "83991355466" {
+			t.Errorf("campos da visão geral não deviam sumir: %+v", lugar)
+		}
+
+		resumo, negativas, err := c.AvaliacoesDoAberto(ctx)
+		if err != nil {
+			t.Fatalf("AvaliacoesDoAberto: %v", err)
+		}
+		if resumo != "" || negativas != nil {
+			t.Errorf("resumo/negativas = %q/%v, want vazio (aba nunca abriu)", resumo, negativas)
+		}
+	})
+
 	t.Run("captcha", func(t *testing.T) {
 		_, err := c.Abrir(ctx, srv.URL+"/sorry/index")
 		if err != ErrCaptcha {
@@ -260,8 +290,13 @@ func TestMapsAoVivo(t *testing.T) {
 	if lugar.Nota == 0 {
 		t.Error("Nota vazia")
 	}
-	if lugar.Avaliacoes == 0 {
-		t.Error("Avaliacoes vazia")
+	switch {
+	case lugar.Avaliacoes > 0:
+		t.Logf("aba de avaliações encontrada: Avaliacoes = %d", lugar.Avaliacoes)
+	case lugar.Avaliacoes == -1:
+		t.Logf("aba de avaliações ausente (visão reduzida): Avaliacoes = -1")
+	default:
+		t.Errorf("Avaliacoes = %d, want > 0 ou == -1 (R12)", lugar.Avaliacoes)
 	}
 
 	resumo, negativas, err := c.AvaliacoesDoAberto(ctx)
@@ -269,7 +304,10 @@ func TestMapsAoVivo(t *testing.T) {
 		t.Fatalf("AvaliacoesDoAberto: %v", err)
 	}
 	t.Logf("resumo: %d chars, negativas: %d avaliações", len(resumo), len(negativas))
-	if resumo == "" && len(negativas) == 0 {
-		t.Error("nem resumo do Gemini nem avaliação negativa: extração de avaliações provavelmente quebrou")
+	if lugar.Avaliacoes > 0 && resumo == "" && len(negativas) == 0 {
+		t.Error("aba abriu mas nem resumo nem avaliação negativa saiu: extração provavelmente quebrou")
+	}
+	if lugar.Avaliacoes == -1 && (resumo != "" || len(negativas) != 0) {
+		t.Error("Avaliacoes == -1 (aba nunca abriu) mas AvaliacoesDoAberto devolveu conteúdo")
 	}
 }

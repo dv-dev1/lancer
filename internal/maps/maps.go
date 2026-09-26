@@ -19,11 +19,10 @@ const BaseGoogleMaps = "https://www.google.com"
 // PausaPadrao é o valor recomendado pra Coletor.Pausa fora de teste.
 const PausaPadrao = 3 * time.Second
 
-// timeoutElemento teta a espera de WaitVisible/Click: sem isso, um seletor que o Google não
-// mostra mais (layout mudou, ou a página é outra do que se esperava) trava a coleta pra sempre.
-// Ao vivo, subir esse valor não reduziu falha na aba Avaliações (achado no fix round 2: quando
-// falha, falha o teto inteiro, não uns segundos a mais — sinal de seletor ausente, não de lentidão).
-const timeoutElemento = 15 * time.Second
+// timeoutElemento teta WaitVisible/Click pra nunca travar pra sempre; subir o valor não reduz a
+// falha na aba Avaliações (round 2: falha o teto inteiro, não uns segundos a mais — seletor
+// ausente, não lentidão). var, não const: o teste da fixture "sem aba" encolhe isso.
+var timeoutElemento = 15 * time.Second
 
 // esperarClicar roda uma ação de espera/clique com teto próprio, sem depender do contexto do chamador ter deadline.
 func esperarClicar(ctx context.Context, acao chromedp.Action) error {
@@ -47,7 +46,9 @@ type Lugar struct {
 	ID, Nome, Endereco, Telefone, Site string
 	Fechado                            bool
 	Nota                               float64
-	Avaliacoes                         int
+	// -1 é "desconhecida": a aba Avaliações não apareceu (visão signed-out às vezes reduz a só
+	// "Visão geral"/"Sobre", sem nenhum sinal de contagem em lugar nenhum — achado no round 3).
+	Avaliacoes int
 }
 
 type Coletor struct {
@@ -189,9 +190,9 @@ type lugarBruto struct {
 	Fechado      bool   `json:"fechado"`
 }
 
-// Abrir também clica na aba Avaliações antes de voltar: é lá, no histograma de estrelas, que a
-// contagem de avaliações aparece pra quem não está logado (a visão geral não mostra). Por isso
-// AvaliacoesDoAberto, chamada logo depois, não precisa clicar de novo.
+// Abrir também clica na aba Avaliações (só lá tem a contagem, pra quem não está logado). Se a aba
+// não aparecer no teto, não é falha do lugar: devolve Avaliacoes -1 (R12), sem erro — por isso
+// AvaliacoesDoAberto, chamada logo depois, não clica de novo.
 func (c *Coletor) Abrir(ctx context.Context, destino string) (Lugar, error) {
 	if p := pausar(c.Pausa); p > 0 {
 		if err := chromedp.Run(ctx, chromedp.Sleep(p)); err != nil {
@@ -221,8 +222,19 @@ func (c *Coletor) Abrir(ctx context.Context, destino string) (Lugar, error) {
 		return Lugar{}, err
 	}
 
+	lugar := Lugar{
+		ID:         idDoLink(urlAtual),
+		Nome:       bruto.Nome,
+		Endereco:   bruto.Endereco,
+		Telefone:   telefoneDoItem(bruto.TelefoneItem),
+		Site:       bruto.Site,
+		Fechado:    bruto.Fechado,
+		Nota:       nota(bruto.NotaTexto),
+		Avaliacoes: -1,
+	}
+
 	if err := esperarClicar(ctx, chromedp.Click(selAbaAvaliacoes, chromedp.ByQuery)); err != nil {
-		return Lugar{}, err
+		return lugar, nil
 	}
 	if err := chromedp.Run(ctx, chromedp.Sleep(esperaAposClique)); err != nil {
 		return Lugar{}, err
@@ -241,17 +253,9 @@ func (c *Coletor) Abrir(ctx context.Context, destino string) (Lugar, error) {
 	for _, p := range partesHistograma {
 		avaliacoes += contagem(p)
 	}
+	lugar.Avaliacoes = avaliacoes
 
-	return Lugar{
-		ID:         idDoLink(urlAtual),
-		Nome:       bruto.Nome,
-		Endereco:   bruto.Endereco,
-		Telefone:   telefoneDoItem(bruto.TelefoneItem),
-		Site:       bruto.Site,
-		Fechado:    bruto.Fechado,
-		Nota:       nota(bruto.NotaTexto),
-		Avaliacoes: avaliacoes,
-	}, nil
+	return lugar, nil
 }
 
 type avaliacaoBruta struct {
