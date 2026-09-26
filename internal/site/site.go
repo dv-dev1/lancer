@@ -36,10 +36,13 @@ func (c *Checador) Checar(ctx context.Context, alvo string) (ruim bool, motivo s
 		return true, "fora do ar"
 	}
 	res, err := c.HTTP.Do(req)
-	if err != nil || res.StatusCode >= 400 {
+	if err != nil {
 		return true, "fora do ar"
 	}
 	defer res.Body.Close()
+	if res.StatusCode >= 400 {
+		return true, "fora do ar"
+	}
 
 	// checa o esquema após seguir redirecionamentos: o real é o que o navegador do lead veria.
 	if res.Request.URL.Scheme != "https" {
