@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -13,11 +14,11 @@ import (
 	"github.com/dv-dev1/lancer/internal/custo"
 	"github.com/dv-dev1/lancer/internal/lead"
 	"github.com/dv-dev1/lancer/internal/llm"
-	"github.com/dv-dev1/lancer/internal/places"
+	"github.com/dv-dev1/lancer/internal/maps"
 	"github.com/dv-dev1/lancer/internal/site"
 )
 
-// termosPorNicho traduz a flag --nicho nos termos de busca do Places.
+// termosPorNicho traduz a flag --nicho nos termos de busca no Maps.
 var termosPorNicho = map[string][]string{
 	"restaurante": {"restaurante", "lanchonete"},
 	"confeitaria": {"confeitaria", "doceria"},
@@ -28,6 +29,13 @@ var termosPorNicho = map[string][]string{
 // prioridadeDor decide o GanchoPadrao quando a LLM não devolve gancho (ruling R2):
 // a dor de maior peso primeiro, na ordem de Pontuar.
 var prioridadeDor = []lead.Dor{lead.SemSite, lead.SiteAgregador, lead.SiteRuim, lead.Reclamacao}
+
+// mensagemCaptcha é o texto exato que a coleta mostra quando o Google barra com captcha.
+const mensagemCaptcha = "Google pediu captcha — coleta parada; tente amanhã"
+
+// maxPorBusca é o teto de resultados por termo de busca no feed do Maps.
+// ponytail: fixo em 20; sobe a constante se um nicho pedir mais que isso por termo.
+const maxPorBusca = 20
 
 type entrada struct {
 	Nicho      string
@@ -42,35 +50,54 @@ type descarte struct {
 	Motivo string
 }
 
-// coletar busca, filtra e monta a mensagem dos leads do dia. Os cortes baratos (status, celular, porte)
+// contagemMaps registra o uso do Maps: é grátis (navegador, sem API paga), mas ainda vale mostrar na saída.
+type contagemMaps struct {
+	Buscas         int
+	LugaresAbertos int
+}
+
+// erroSistemico devolve não-nil só pra falhas que abortam a coleta inteira (hoje, só captcha).
+// Qualquer outro erro de um lugar isolado vira descarte — não pode derrubar o resto da rodada.
+func erroSistemico(err error) error {
+	if errors.Is(err, maps.ErrCaptcha) {
+		return errors.New(mensagemCaptcha)
+	}
+	return nil
+}
+
+// coletar busca, filtra e monta a mensagem dos leads do dia. Os cortes baratos (fechado, celular, porte)
 // acontecem antes de avaliações e LLM, que são o SKU caro.
-func coletar(ctx context.Context, pl *places.Cliente, sc *site.Checador, lc *llm.Cliente, r *rand.Rand, e entrada) ([]lead.Lead, []descarte, error) {
+func coletar(ctx context.Context, mc *maps.Coletor, sc *site.Checador, lc *llm.Cliente, r *rand.Rand, e entrada) ([]lead.Lead, []descarte, contagemMaps, error) {
 	termos, ok := termosPorNicho[e.Nicho]
 	if !ok {
-		return nil, nil, fmt.Errorf("nicho %q inválido; use restaurante, confeitaria, loja ou servico", e.Nicho)
+		return nil, nil, contagemMaps{}, fmt.Errorf("nicho %q inválido; use restaurante, confeitaria, loja ou servico", e.Nicho)
 	}
 
-	ids, err := buscarIDsDeduplicados(ctx, pl, termos, e.Bairro)
+	resultados, buscas, err := buscarDeduplicados(ctx, mc, termos, e.Bairro)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, contagemMaps{}, err
 	}
 
 	var leads []lead.Lead
 	var descartes []descarte
 	qualificados := 0
-	for _, id := range ids {
+	abertos := 0
+	for _, res := range resultados {
 		if qualificados >= e.Limite {
 			break
 		}
 
-		lugar, err := pl.Detalhar(ctx, id)
+		lugar, err := mc.Abrir(ctx, res.URL)
+		abertos++
 		if err != nil {
-			// falha num lugar isolado (deletado, blip de rede) não pode derrubar a coleta inteira;
-			// só a busca de IDs (acima) é sistêmica o bastante pra abortar.
-			descartes = append(descartes, descarte{id, fmt.Sprintf("erro: %v", err)})
+			if sistemico := erroSistemico(err); sistemico != nil {
+				return nil, nil, contagemMaps{}, sistemico
+			}
+			// falha num lugar isolado (página fora do ar, blip de rede) não pode derrubar a coleta inteira.
+			descartes = append(descartes, descarte{res.Nome, fmt.Sprintf("erro: %v", err)})
 			continue
 		}
-		if lugar.Status != "OPERATIONAL" {
+		if lugar.Fechado {
 			descartes = append(descartes, descarte{lugar.Nome, "fechado"})
 			continue
 		}
@@ -87,15 +114,18 @@ func coletar(ctx context.Context, pl *places.Cliente, sc *site.Checador, lc *llm
 
 		dores, detalhes, err := classificarESitear(ctx, sc, lugar)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, contagemMaps{}, err
 		}
 
-		avaliacoes, err := pl.Avaliacoes(ctx, lugar.ID)
+		resumo, negativas, err := mc.AvaliacoesDoAberto(ctx)
 		if err != nil {
+			if sistemico := erroSistemico(err); sistemico != nil {
+				return nil, nil, contagemMaps{}, sistemico
+			}
 			descartes = append(descartes, descarte{lugar.Nome, fmt.Sprintf("erro: %v", err)})
 			continue
 		}
-		saida, err := lc.Analisar(ctx, llm.Entrada{Nicho: e.Nicho, Dores: detalhes, Avaliacoes: avaliacoes})
+		saida, err := lc.Analisar(ctx, llm.Entrada{Nicho: e.Nicho, Dores: detalhes, Avaliacoes: montarAvaliacoes(resumo, negativas)})
 		if err != nil {
 			descartes = append(descartes, descarte{lugar.Nome, fmt.Sprintf("erro: %v", err)})
 			continue
@@ -136,31 +166,45 @@ func coletar(ctx context.Context, pl *places.Cliente, sc *site.Checador, lc *llm
 	}
 
 	sort.Slice(leads, func(i, j int) bool { return leads[i].Pontuacao > leads[j].Pontuacao })
-	return leads, descartes, nil
+	return leads, descartes, contagemMaps{Buscas: buscas, LugaresAbertos: abertos}, nil
 }
 
-func buscarIDsDeduplicados(ctx context.Context, pl *places.Cliente, termos []string, bairro string) ([]string, error) {
+// montarAvaliacoes é o que a LLM lê: o resumo do Gemini (quando existe) na frente das negativas.
+func montarAvaliacoes(resumo string, negativas []string) []string {
+	var avaliacoes []string
+	if resumo != "" {
+		avaliacoes = append(avaliacoes, resumo)
+	}
+	return append(avaliacoes, negativas...)
+}
+
+func buscarDeduplicados(ctx context.Context, mc *maps.Coletor, termos []string, bairro string) ([]maps.Resultado, int, error) {
 	vistos := map[string]bool{}
-	var ids []string
+	var resultados []maps.Resultado
+	buscas := 0
 	for _, termo := range termos {
 		consulta := fmt.Sprintf("%s em %s, João Pessoa - PB", termo, bairro)
-		encontrados, err := pl.BuscarIDs(ctx, consulta)
+		encontrados, err := mc.Buscar(ctx, consulta, maxPorBusca)
+		buscas++
 		if err != nil {
-			return nil, err
+			if sistemico := erroSistemico(err); sistemico != nil {
+				return nil, buscas, sistemico
+			}
+			return nil, buscas, err
 		}
-		for _, id := range encontrados {
-			if !vistos[id] {
-				vistos[id] = true
-				ids = append(ids, id)
+		for _, res := range encontrados {
+			if !vistos[res.ID] {
+				vistos[res.ID] = true
+				resultados = append(resultados, res)
 			}
 		}
 	}
-	return ids, nil
+	return resultados, buscas, nil
 }
 
 // classificarESitear aplica a dor de site (sem site, agregador, ou Checar no site próprio).
 // Só site próprio (ClassificarSite == "") gasta uma checagem de PageSpeed.
-func classificarESitear(ctx context.Context, sc *site.Checador, lugar places.Lugar) ([]lead.Dor, map[lead.Dor]string, error) {
+func classificarESitear(ctx context.Context, sc *site.Checador, lugar maps.Lugar) ([]lead.Dor, map[lead.Dor]string, error) {
 	var dores []lead.Dor
 	detalhes := map[lead.Dor]string{}
 
@@ -214,7 +258,7 @@ func linkPreview(previewURL, slug string) string {
 	return base + "/p/" + slug
 }
 
-func imprimir(w io.Writer, leads []lead.Lead, descartes []descarte, conta custo.Conta) {
+func imprimir(w io.Writer, leads []lead.Lead, descartes []descarte, conta custo.Conta, cm contagemMaps) {
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(tw, "pontos\tnome\tdores\tnota (n)\tvariante\ttelefone")
 	for _, l := range leads {
@@ -233,7 +277,8 @@ func imprimir(w io.Writer, leads []lead.Lead, descartes []descarte, conta custo.
 		}
 	}
 
-	fmt.Fprintf(w, "\nconta: %+v — teto US$ %.2f (cota grátis já considerada estourada)\n", conta, conta.Teto())
+	fmt.Fprintf(w, "\nMaps: %d buscas, %d lugares abertos (grátis)\n", cm.Buscas, cm.LugaresAbertos)
+	fmt.Fprintf(w, "conta: %+v — teto US$ %.2f\n", conta, conta.Teto())
 }
 
 func doresParaTexto(dores []lead.Dor) string {

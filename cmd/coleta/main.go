@@ -13,7 +13,7 @@ import (
 
 	"github.com/dv-dev1/lancer/internal/custo"
 	"github.com/dv-dev1/lancer/internal/llm"
-	"github.com/dv-dev1/lancer/internal/places"
+	"github.com/dv-dev1/lancer/internal/maps"
 	"github.com/dv-dev1/lancer/internal/site"
 )
 
@@ -23,14 +23,11 @@ func main() {
 	limite := flag.Int("limite", 10, "quantidade de leads qualificados")
 	flag.Parse()
 
-	chaveMaps := os.Getenv("GOOGLE_MAPS_API_KEY")
 	chaveOpenAI := os.Getenv("OPENAI_API_KEY")
 	remetente := os.Getenv("LANCER_REMETENTE")
+	chavePageSpeed := os.Getenv("PAGESPEED_API_KEY") // opcional: PageSpeed funciona sem chave em volume baixo
 
 	var faltando []string
-	if chaveMaps == "" {
-		faltando = append(faltando, "GOOGLE_MAPS_API_KEY")
-	}
 	if chaveOpenAI == "" {
 		faltando = append(faltando, "OPENAI_API_KEY")
 	}
@@ -46,12 +43,15 @@ func main() {
 	// que já gerencia seu próprio deadline via contexto — o client não pode cortar antes dele.
 	cliente := &http.Client{Timeout: 90 * time.Second}
 	conta := &custo.Conta{}
-	pl := &places.Cliente{Chave: chaveMaps, Base: "https://places.googleapis.com", HTTP: cliente, Conta: conta}
-	sc := &site.Checador{HTTP: cliente, PageSpeedBase: "https://www.googleapis.com", Chave: chaveMaps, NotaMinima: 0.5}
+
+	ctx, cancelNavegador := maps.Novo(context.Background())
+	defer cancelNavegador()
+	mc := &maps.Coletor{Pausa: maps.PausaPadrao}
+	sc := &site.Checador{HTTP: cliente, PageSpeedBase: "https://www.googleapis.com", Chave: chavePageSpeed, NotaMinima: 0.5}
 	lc := &llm.Cliente{Chave: chaveOpenAI, Base: "https://api.openai.com", HTTP: cliente, Conta: conta}
 	r := rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), 0))
 
-	leads, descartes, err := coletar(context.Background(), pl, sc, lc, r, entrada{
+	leads, descartes, cm, err := coletar(ctx, mc, sc, lc, r, entrada{
 		Nicho:      *nicho,
 		Bairro:     *bairro,
 		Limite:     *limite,
@@ -63,5 +63,5 @@ func main() {
 		os.Exit(1)
 	}
 
-	imprimir(os.Stdout, leads, descartes, *conta)
+	imprimir(os.Stdout, leads, descartes, *conta, cm)
 }

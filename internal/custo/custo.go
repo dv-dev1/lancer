@@ -2,9 +2,6 @@
 package custo
 
 type Conta struct {
-	IDs           int
-	Detalhes      int
-	Atmosfera     int
 	TokensEntrada int
 	TokensSaida   int
 }
