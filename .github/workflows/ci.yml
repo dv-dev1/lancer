@@ -8,6 +8,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         go-version: ["stable", "oldstable"]
     steps:
@@ -15,5 +16,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go-version }}
+      # Ubuntu 23.10+ bloqueia via AppArmor os namespaces que o sandbox do Chrome usa; sem isto os testes do chromedp morrem com "No usable sandbox".
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: go vet ./...
       - run: go test ./...
