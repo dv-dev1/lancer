@@ -148,10 +148,53 @@ func TestGanchoValido(t *testing.T) {
 		{"R$ 50", false},
 		{"https://", false},
 		{strings.Repeat("a", 241), false},
+		{"vocês usam um site agregador hoje", false},
+		{"vi que o contato de vocês é o app.cardapioweb.com", false},
+		{"vi que vocês usam beacons.ai pra tudo", false},
+		{"vi que o contato de vocês hoje é só o Cardápio Web", true},
 	}
 	for _, c := range casos {
 		if got := GanchoValido(c.gancho); got != c.want {
 			t.Errorf("GanchoValido(%q) = %v, want %v", c.gancho, got, c.want)
+		}
+	}
+}
+
+func TestNomeDaPlataforma(t *testing.T) {
+	casos := []struct{ uri, want string }{
+		{"https://www.instagram.com/padoca", "Instagram"},
+		{"instagram.com/padoca", "Instagram"},
+		{"https://app.cardapioweb.com/loja", "Cardápio Web"},
+		{"https://www.ifood.com.br/delivery/loja", "iFood"},
+		{"https://beacons.ai/padoca", "Beacons"},
+		{"https://linktr.ee/padoca", "Linktree"},
+	}
+	for _, c := range casos {
+		if got := NomeDaPlataforma(c.uri); got != c.want {
+			t.Errorf("NomeDaPlataforma(%q) = %q, want %q", c.uri, got, c.want)
+		}
+	}
+}
+
+func TestMontarMensagemPontuacaoFinal(t *testing.T) {
+	const remetente = "Daniel"
+	const link = "https://lancer.exemplo/p/padaria-abcd"
+	casos := []string{
+		"vi que ainda não tem site.",
+		"vi que ainda não tem site!",
+		"vi que ainda não tem site?",
+		"vi que ainda não tem site…",
+		"vi que ainda não tem site",
+	}
+	for _, gancho := range casos {
+		msg := MontarMensagem(remetente, gancho, Texto, link)
+		if strings.Contains(msg, "..") || strings.Contains(msg, ". .") || strings.Contains(msg, "?.") ||
+			strings.Contains(msg, "!.") || strings.Contains(msg, "….") {
+			t.Errorf("MontarMensagem com gancho %q gerou pontuação duplicada: %q", gancho, msg)
+		}
+		const esperado = "vi que ainda não tem site. faz sentido pra vocês?"
+		if !strings.Contains(msg, esperado) {
+			t.Errorf("MontarMensagem(%q) = %q, want conter %q", gancho, msg, esperado)
 		}
 	}
 }

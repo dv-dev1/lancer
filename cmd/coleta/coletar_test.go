@@ -349,19 +349,6 @@ func TestColetarCaptchaAborta(t *testing.T) {
 	}
 }
 
-func TestDominioDe(t *testing.T) {
-	casos := []struct{ uri, want string }{
-		{"https://www.instagram.com/padoca", "instagram.com"},
-		{"instagram.com/padoca", "instagram.com"},
-		{"https://ifood.com.br/delivery/loja", "ifood.com.br"},
-	}
-	for _, c := range casos {
-		if got := dominioDe(c.uri); got != c.want {
-			t.Errorf("dominioDe(%q) = %q, want %q", c.uri, got, c.want)
-		}
-	}
-}
-
 func TestDorPrincipal(t *testing.T) {
 	casos := []struct {
 		dores []lead.Dor

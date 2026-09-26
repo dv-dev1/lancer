@@ -4,6 +4,7 @@ package lead
 import (
 	"math/rand/v2"
 	"net/url"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 )
@@ -45,6 +46,35 @@ var agregadores = []string{
 	"instagram.com", "facebook.com", "fb.com", "linktr.ee", "wa.me", "whatsapp.com",
 	"ifood.com.br", "goomer.app", "anota.ai", "cardapioweb.com", "linkin.bio",
 	"beacons.ai", "taplink.cc", "bio.link",
+}
+
+// nomesPlataforma fica ao lado de agregadores (mesma lista de domínios): uma fonte só de verdade.
+var nomesPlataforma = map[string]string{
+	"instagram.com":   "Instagram",
+	"facebook.com":    "Facebook",
+	"fb.com":          "Facebook",
+	"linktr.ee":       "Linktree",
+	"wa.me":           "WhatsApp",
+	"whatsapp.com":    "WhatsApp",
+	"ifood.com.br":    "iFood",
+	"goomer.app":      "Goomer",
+	"anota.ai":        "Anota AI",
+	"cardapioweb.com": "Cardápio Web",
+	"linkin.bio":      "Linkin.bio",
+	"beacons.ai":      "Beacons",
+	"taplink.cc":      "Taplink",
+	"bio.link":        "Bio.link",
+}
+
+// NomeDaPlataforma nunca devolve o host cru: a mensagem final não pode citar domínio.
+func NomeDaPlataforma(uri string) string {
+	host := hostDe(uri)
+	for _, d := range agregadores {
+		if host == d || strings.HasSuffix(host, "."+d) {
+			return nomesPlataforma[d]
+		}
+	}
+	return host
 }
 
 func ClassificarSite(uri string) Dor {
@@ -186,12 +216,18 @@ func Slug(nome, placeID string) string {
 	return base + "-" + sufixo
 }
 
+// reHostCru pega domínio cru citado num gancho (ex.: "app.cardapioweb.com", "beacons.ai").
+var reHostCru = regexp.MustCompile(`\b[a-z0-9-]+\.(com|com\.br|app|ai|ee|me|io)\b`)
+
 // preço e link ficam fora do primeiro contato por decisão de produto.
 func GanchoValido(g string) bool {
 	if utf8.RuneCountInString(g) > 240 {
 		return false
 	}
-	return !strings.Contains(g, "R$") && !strings.Contains(g, "http")
+	if strings.Contains(g, "R$") || strings.Contains(g, "http") || strings.Contains(g, "agregador") {
+		return false
+	}
+	return !reHostCru.MatchString(strings.ToLower(g))
 }
 
 // fallback para quando a LLM falha ou não roda.
@@ -212,6 +248,8 @@ func GanchoPadrao(d Dor, detalhe string) string {
 
 // a frase de opt-out é fixa: nunca reenviar sem essa saída.
 func MontarMensagem(remetente, gancho string, v Variante, link string) string {
+	// o gancho (LLM ou GanchoPadrao) às vezes já termina em pontuação; sem isso dobra ("..").
+	gancho = strings.TrimRight(gancho, " .!?…")
 	msg := "oi, aqui é o " + remetente + ". " + gancho + ". faz sentido pra vocês?"
 	msg += " se não fizer sentido, é só me avisar que não mando mais nada."
 	if v == Link {

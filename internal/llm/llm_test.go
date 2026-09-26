@@ -14,7 +14,11 @@ import (
 )
 
 type corpoRequisicao struct {
-	Model          string `json:"model"`
+	Model    string `json:"model"`
+	Messages []struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	} `json:"messages"`
 	ResponseFormat struct {
 		Type       string `json:"type"`
 		JSONSchema struct {
@@ -92,6 +96,51 @@ func TestAnalisarRequisicaoESchema(t *testing.T) {
 	}
 	if conta.TokensEntrada != 120 || conta.TokensSaida != 40 {
 		t.Errorf("Conta = %+v, want TokensEntrada=120 TokensSaida=40", conta)
+	}
+}
+
+func TestPromptSistemaRegras(t *testing.T) {
+	var recebido corpoRequisicao
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&recebido)
+		fmt.Fprint(w, respostaOpenAI(`{"reclamacao":"","gancho":"vi que ainda não tem site"}`, 1, 1))
+	}))
+	defer srv.Close()
+
+	conta := &custo.Conta{}
+	c := &Cliente{Chave: "chave-teste", Base: srv.URL, HTTP: srv.Client(), Conta: conta}
+	if _, err := c.Analisar(context.Background(), Entrada{Nicho: "loja"}); err != nil {
+		t.Fatalf("Analisar: %v", err)
+	}
+
+	if len(recebido.Messages) == 0 || recebido.Messages[0].Role != "system" {
+		t.Fatalf("Messages = %+v, want [0] com role system", recebido.Messages)
+	}
+	prompt := recebido.Messages[0].Content
+
+	proibidas := []string{"agregador", "presença digital", "captação", "visibilidade"}
+	for _, p := range proibidas {
+		if !strings.Contains(prompt, p) {
+			t.Errorf("prompt não cita a palavra proibida %q pra instruir a LLM a nunca usá-la", p)
+		}
+	}
+	if !strings.Contains(prompt, "nunca") {
+		t.Error("prompt devia deixar claro que essas palavras nunca podem aparecer")
+	}
+	if !strings.Contains(prompt, "primeira pessoa do singular") {
+		t.Error("prompt devia pedir primeira pessoa do singular (nunca \"percebemos\")")
+	}
+	if !strings.Contains(prompt, "nome comum da plataforma") {
+		t.Error("prompt devia pedir o nome comum da plataforma, nunca o host")
+	}
+	if !strings.Contains(prompt, "Instagram") || !strings.Contains(prompt, "iFood") {
+		t.Error("prompt devia dar exemplos de nome comum de plataforma (Instagram, iFood, ...)")
+	}
+	if !strings.Contains(prompt, "consequência concreta") {
+		t.Error("prompt devia pedir a consequência concreta pra quem compra, não marketing genérico")
+	}
+	if !strings.Contains(prompt, "1 frase curta") {
+		t.Error("prompt devia limitar o gancho a 1 frase curta")
 	}
 }
 

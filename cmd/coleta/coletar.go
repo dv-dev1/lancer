@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"math/rand/v2"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -215,7 +214,7 @@ func classificarESitear(ctx context.Context, sc *site.Checador, lugar maps.Lugar
 		detalhes[lead.SemSite] = "" // precisa existir como chave: é o que informa a LLM que a dor já foi detectada
 	case lead.SiteAgregador:
 		dores = append(dores, lead.SiteAgregador)
-		detalhes[lead.SiteAgregador] = dominioDe(lugar.Site)
+		detalhes[lead.SiteAgregador] = lead.NomeDaPlataforma(lugar.Site)
 	default:
 		if ruim, motivo := sc.Checar(ctx, lugar.Site); ruim {
 			dores = append(dores, lead.SiteRuim)
@@ -223,18 +222,6 @@ func classificarESitear(ctx context.Context, sc *site.Checador, lugar maps.Lugar
 		}
 	}
 	return dores, detalhes, nil
-}
-
-// dominioDe extrai só o domínio do agregador (ex.: "instagram.com"), nunca a URL completa do perfil.
-func dominioDe(uri string) string {
-	if !strings.Contains(uri, "://") {
-		uri = "https://" + uri
-	}
-	u, err := url.Parse(uri)
-	if err != nil {
-		return uri
-	}
-	return strings.TrimPrefix(u.Hostname(), "www.")
 }
 
 func dorPrincipal(dores []lead.Dor) lead.Dor {
