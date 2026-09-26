@@ -152,6 +152,11 @@ func TestGanchoValido(t *testing.T) {
 		{"vi que o contato de vocês é o app.cardapioweb.com", false},
 		{"vi que vocês usam beacons.ai pra tudo", false},
 		{"vi que o contato de vocês hoje é só o Cardápio Web", true},
+		{"vocês usam um site Agregador hoje", false}, // "agregador" tem que ser recusado sem casesensitivity
+		{"HTTP://x", false},
+		{"r$ 20", false},
+		{"fica na R. 13 de Maio", true}, // "R." de rua não pode confundir com "R$"
+		{"nota 3.5", true},              // número decimal não pode confundir com host
 	}
 	for _, c := range casos {
 		if got := GanchoValido(c.gancho); got != c.want {

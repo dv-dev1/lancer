@@ -2,9 +2,11 @@
 package lead
 
 import (
+	"maps"
 	"math/rand/v2"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -42,13 +44,8 @@ type Lead struct {
 	Mensagem   string
 }
 
-var agregadores = []string{
-	"instagram.com", "facebook.com", "fb.com", "linktr.ee", "wa.me", "whatsapp.com",
-	"ifood.com.br", "goomer.app", "anota.ai", "cardapioweb.com", "linkin.bio",
-	"beacons.ai", "taplink.cc", "bio.link",
-}
-
-// nomesPlataforma fica ao lado de agregadores (mesma lista de domínios): uma fonte só de verdade.
+// nomesPlataforma é a única lista de agregadores conhecidos (domínio → nome comum da plataforma).
+// Duas listas em paralelo (uma de domínios, outra de nomes) tinham que ser sincronizadas à mão.
 var nomesPlataforma = map[string]string{
 	"instagram.com":   "Instagram",
 	"facebook.com":    "Facebook",
@@ -66,13 +63,23 @@ var nomesPlataforma = map[string]string{
 	"bio.link":        "Bio.link",
 }
 
+// dominioDaPlataforma acha o domínio de nomesPlataforma que bate com host, por igualdade ou sufixo.
+// Nenhum domínio da lista é sufixo de outro, então a ordem não muda o resultado; mesmo assim itera
+// ordenado (em vez de "range" direto no mapa) pra não depender da ordem aleatória do Go.
+func dominioDaPlataforma(host string) (string, bool) {
+	for _, d := range slices.Sorted(maps.Keys(nomesPlataforma)) {
+		if host == d || strings.HasSuffix(host, "."+d) {
+			return d, true
+		}
+	}
+	return "", false
+}
+
 // NomeDaPlataforma nunca devolve o host cru: a mensagem final não pode citar domínio.
 func NomeDaPlataforma(uri string) string {
 	host := hostDe(uri)
-	for _, d := range agregadores {
-		if host == d || strings.HasSuffix(host, "."+d) {
-			return nomesPlataforma[d]
-		}
+	if d, ok := dominioDaPlataforma(host); ok {
+		return nomesPlataforma[d]
 	}
 	return host
 }
@@ -81,11 +88,8 @@ func ClassificarSite(uri string) Dor {
 	if uri == "" {
 		return SemSite
 	}
-	host := hostDe(uri)
-	for _, d := range agregadores {
-		if host == d || strings.HasSuffix(host, "."+d) {
-			return SiteAgregador
-		}
+	if _, ok := dominioDaPlataforma(hostDe(uri)); ok {
+		return SiteAgregador
 	}
 	return ""
 }
@@ -224,10 +228,11 @@ func GanchoValido(g string) bool {
 	if utf8.RuneCountInString(g) > 240 {
 		return false
 	}
-	if strings.Contains(g, "R$") || strings.Contains(g, "http") || strings.Contains(g, "agregador") {
+	gl := strings.ToLower(g)
+	if strings.Contains(gl, "r$") || strings.Contains(gl, "http") || strings.Contains(gl, "agregador") {
 		return false
 	}
-	return !reHostCru.MatchString(strings.ToLower(g))
+	return !reHostCru.MatchString(gl)
 }
 
 // fallback para quando a LLM falha ou não roda.
