@@ -122,6 +122,14 @@ func TestColetorComFixture(t *testing.T) {
 	}
 
 	// waits curtos só no teste: a produção precisa do tempo real pro Google carregar assíncrono.
+	// restaura no Cleanup: sem isso TestMapsAoVivo herda os valores curtos e reporta falso -1/erro
+	// contra o Maps real (rodando `go test ./internal/maps/` sem -run).
+	espCliqueOrig, espRolagemOrig, timeoutOrig := esperaAposClique, esperaAposRolagem, timeoutElemento
+	t.Cleanup(func() {
+		esperaAposClique = espCliqueOrig
+		esperaAposRolagem = espRolagemOrig
+		timeoutElemento = timeoutOrig
+	})
 	esperaAposClique = 200 * time.Millisecond
 	esperaAposRolagem = 200 * time.Millisecond
 	timeoutElemento = 500 * time.Millisecond // senão "lugar sem aba" esperaria os 15s de produção
@@ -257,6 +265,21 @@ func TestColetorComFixture(t *testing.T) {
 			t.Fatalf("Abrir em página de captcha: err = %v, want ErrCaptcha", err)
 		}
 	})
+}
+
+// TestTimingsRestauradosAposFixture prova que TestColetorComFixture devolve os timings de produção:
+// roda logo depois dela na mesma arquivo (Go executa em ordem do source dentro do pacote), então
+// sem o Cleanup essas vars ainda estariam nos valores curtos do teste anterior.
+func TestTimingsRestauradosAposFixture(t *testing.T) {
+	if timeoutElemento != 15*time.Second {
+		t.Errorf("timeoutElemento = %v, want 15s (valor de produção)", timeoutElemento)
+	}
+	if esperaAposClique != 2*time.Second {
+		t.Errorf("esperaAposClique = %v, want 2s (valor de produção)", esperaAposClique)
+	}
+	if esperaAposRolagem != 1500*time.Millisecond {
+		t.Errorf("esperaAposRolagem = %v, want 1500ms (valor de produção)", esperaAposRolagem)
+	}
 }
 
 // TestMapsAoVivo é a checagem rápida pra quando o Google mudar o layout; só roda sob pedido
