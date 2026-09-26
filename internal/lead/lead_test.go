@@ -56,6 +56,8 @@ func TestPortePassa(t *testing.T) {
 		{4.0, 30, true},
 		{3.9, 500, false},
 		{4.8, 29, false},
+		{4.5, -1, true},  // R12: avaliações desconhecida (-1) cai pra só a nota
+		{3.9, -1, false}, // idem, mas nota abaixo do mínimo
 	}
 	for _, c := range casos {
 		if got := PortePadrao.Passa(c.nota, c.n); got != c.want {
@@ -78,6 +80,16 @@ func TestPontuar(t *testing.T) {
 	semSite100 := Lead{Nota: 4.0, Avaliacoes: 100, Dores: []Dor{SemSite}}
 	if !(Pontuar(semSite300) > Pontuar(semSite100)) {
 		t.Errorf("com a mesma dor, 300 avaliações (%d) devia pontuar mais que 100 (%d)", Pontuar(semSite300), Pontuar(semSite100))
+	}
+
+	// R12: avaliações desconhecida (-1) não pode pontuar negativo nem diferente de 0 avaliações conhecidas.
+	desconhecida := Lead{Nota: 4.0, Avaliacoes: -1, Dores: []Dor{SemSite}}
+	zero := Lead{Nota: 4.0, Avaliacoes: 0, Dores: []Dor{SemSite}}
+	if Pontuar(desconhecida) < 0 {
+		t.Errorf("Pontuar com Avaliacoes desconhecida (-1) não pode ser negativo: %d", Pontuar(desconhecida))
+	}
+	if Pontuar(desconhecida) != Pontuar(zero) {
+		t.Errorf("Avaliacoes desconhecida (-1) devia pontuar igual a 0 conhecidas: %d vs %d", Pontuar(desconhecida), Pontuar(zero))
 	}
 }
 

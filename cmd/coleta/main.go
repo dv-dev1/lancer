@@ -46,7 +46,7 @@ func main() {
 
 	ctx, cancelNavegador := maps.Novo(context.Background())
 	defer cancelNavegador()
-	mc := &maps.Coletor{Pausa: maps.PausaPadrao}
+	mc := &maps.Coletor{} // Pausa zero já cai no padrão de produção (maps.PausaPadrao + sorteio)
 	sc := &site.Checador{HTTP: cliente, PageSpeedBase: "https://www.googleapis.com", Chave: chavePageSpeed, NotaMinima: 0.5}
 	lc := &llm.Cliente{Chave: chaveOpenAI, Base: "https://api.openai.com", HTTP: cliente, Conta: conta}
 	r := rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), 0))

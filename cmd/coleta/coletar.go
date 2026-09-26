@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -262,7 +263,7 @@ func imprimir(w io.Writer, leads []lead.Lead, descartes []descarte, conta custo.
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(tw, "pontos\tnome\tdores\tnota (n)\tvariante\ttelefone")
 	for _, l := range leads {
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%.1f (%d)\t%s\t%s\n", l.Pontuacao, l.Nome, doresParaTexto(l.Dores), l.Nota, l.Avaliacoes, l.Variante, l.Telefone)
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%.1f (%s)\t%s\t%s\n", l.Pontuacao, l.Nome, doresParaTexto(l.Dores), l.Nota, avaliacoesTexto(l.Avaliacoes), l.Variante, l.Telefone)
 	}
 	tw.Flush()
 
@@ -287,4 +288,12 @@ func doresParaTexto(dores []lead.Dor) string {
 		nomes[i] = string(d)
 	}
 	return strings.Join(nomes, ",")
+}
+
+// avaliacoesTexto mostra "?" pra -1 (R12: aba de avaliações ausente, contagem desconhecida).
+func avaliacoesTexto(n int) string {
+	if n < 0 {
+		return "?"
+	}
+	return strconv.Itoa(n)
 }

@@ -107,7 +107,12 @@ type Porte struct {
 
 var PortePadrao = Porte{NotaMin: 4.0, AvaliacoesMin: 30}
 
+// R12: n == -1 é "desconhecida" (aba de avaliações ausente no Maps signed-out) — sem contagem pra
+// comparar com AvaliacoesMin, o porte cai pra só a nota.
 func (p Porte) Passa(nota float64, n int) bool {
+	if n < 0 {
+		return nota >= p.NotaMin
+	}
 	return nota >= p.NotaMin && n >= p.AvaliacoesMin
 }
 
@@ -116,6 +121,9 @@ func Pontuar(l Lead) int {
 	n := l.Avaliacoes
 	if n > 500 {
 		n = 500
+	}
+	if n < 0 { // desconhecida (R12): não pontua nem penaliza volume, só não pode virar negativo
+		n = 0
 	}
 	pontos := n/5 + int((l.Nota-4)*50)
 	for _, d := range l.Dores {

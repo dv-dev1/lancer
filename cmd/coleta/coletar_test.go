@@ -43,16 +43,17 @@ type reviewFix struct {
 	ID, Estrelas, Texto string
 }
 
-// paginaLugar monta um fixture de página de lugar compatível com os seletores de internal/maps
-// (mesma estrutura de internal/maps/maps_test.go, parametrizada pro cenário de cada teste).
-func paginaLugar(nome, notaTexto, avaliacoesTexto, telefoneDigitos, siteHref string, fechado bool, resumo string, reviews []reviewFix) string {
+// paginaLugar monta um fixture de página de lugar compatível com os seletores de internal/maps.
+// comAba=false modela a visão signed-out reduzida (sem aba de Avaliações, achada ao vivo no round 3
+// do internal/maps): é o caminho do R12, então nesse caso nem histograma, nem resumo, nem
+// avaliações existem no DOM — só a "Visão geral"/"Sobre".
+func paginaLugar(nome, notaTexto, telefoneDigitos, siteHref string, fechado, comAba bool, estrelas [5]int, resumo string, reviews []reviewFix) string {
 	var b strings.Builder
 	b.WriteString("<html><body>\n  <h1>" + nome + "</h1>\n")
 	if fechado {
 		b.WriteString("  <p>Fechado permanentemente</p>\n")
 	}
 	b.WriteString(`  <span role="img" aria-label="` + notaTexto + ` estrelas">` + notaTexto + "</span>\n")
-	b.WriteString(`  <span aria-label="` + avaliacoesTexto + ` avaliações">` + avaliacoesTexto + " avaliações</span>\n")
 	if telefoneDigitos != "" {
 		b.WriteString(`  <button data-item-id="phone:tel:0` + telefoneDigitos + `">telefone</button>` + "\n")
 	}
@@ -60,7 +61,15 @@ func paginaLugar(nome, notaTexto, avaliacoesTexto, telefoneDigitos, siteHref str
 		b.WriteString(`  <a data-item-id="authority" href="` + siteHref + `">site</a>` + "\n")
 	}
 	b.WriteString(`  <button data-item-id="address" aria-label="Endereço: Rua Teste, 1 - Bairro">Rua Teste, 1</button>` + "\n")
-	b.WriteString(`  <button role="tab" aria-label="Avaliações">Avaliações</button>` + "\n")
+	if !comAba {
+		b.WriteString(`  <button role="tab" aria-label="Sobre">Sobre</button>` + "\n</body></html>")
+		return b.String()
+	}
+	b.WriteString(`  <button role="tab" aria-label="Avaliações">Avaliações</button>` + "\n  <div>\n")
+	for i, estrelaN := range []int{5, 4, 3, 2, 1} {
+		b.WriteString(fmt.Sprintf(`    <span aria-label="%d estrelas, %d avaliações"></span>`+"\n", estrelaN, estrelas[i]))
+	}
+	b.WriteString("  </div>\n")
 	if resumo != "" {
 		b.WriteString("  <div>\n    <div>\n      <div>\n        <span>" + resumo + "+5</span>\n        <span>Resumo feito com o Gemini</span>\n      </div>\n    </div>\n  </div>\n")
 	}
@@ -74,6 +83,13 @@ func paginaLugar(nome, notaTexto, avaliacoesTexto, telefoneDigitos, siteHref str
 
 func feedItem(id, nome string) string {
 	return fmt.Sprintf(`<a href="/maps/place/x/data=!19s%s" aria-label="%s">%s</a>`, id, nome, nome)
+}
+
+// feedItemAbsoluto aponta pra fora do servidor da busca: simula o Abrir de um lugar isolado
+// falhando por conexão recusada, sem precisar encolher o timeout de internal/maps (não dá pra
+// tocar nesse pacote a partir daqui, e o timeout de produção é de 15s).
+func feedItemAbsoluto(base, id, nome string) string {
+	return fmt.Sprintf(`<a href="%s/maps/place/x/data=!19s%s" aria-label="%s">%s</a>`, base, id, nome, nome)
 }
 
 func feedHTML(itens ...string) string {
@@ -96,20 +112,38 @@ func TestColetarFluxoCompleto(t *testing.T) {
 	}))
 	defer pageSpeed.Close()
 
+	// porta morta: sobe e fecha na hora, só pra ter um endereço que recusa conexão (id-F).
+	portaMorta := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	urlMorta := portaMorta.URL
+	portaMorta.Close()
+
 	aberturas := map[string]int{}
 	lugares := map[string]string{
-		"id-C": paginaLugar("Confeitaria Fechada", "4,5", "100", "83999990001", "", true, "", nil),
-		"id-D": paginaLugar("Confeitaria Sem Celular", "4,5", "100", "", "", false, "", nil),
-		"id-A": paginaLugar("Doceria A", "4,5", "100", "83998765432", siteProprio.URL, false,
+		"id-C": paginaLugar("Confeitaria Fechada", "4,5", "83999990001", "", true, true, [5]int{60, 20, 10, 7, 3}, "", nil),
+		"id-D": paginaLugar("Confeitaria Sem Celular", "4,5", "", "", false, true, [5]int{60, 20, 10, 7, 3}, "", nil),
+		"id-A": paginaLugar("Doceria A", "4,5", "83998765432", siteProprio.URL, false, true, [5]int{70, 15, 8, 4, 3},
 			"Clientes elogiam o atendimento e reclamam da demora no whatsapp.",
 			[]reviewFix{{"r1", "5", "Muito bom, recomendo!"}, {"r2", "2", "demoraram pra responder no whatsapp"}}),
-		"id-B": paginaLugar("Doceria B", "4,0", "30", "83988887777", "", false, "", nil),
-		"id-E": paginaLugar("Doceria E", "4,5", "100", "83977776666", "", false, "", nil),
+		// sem aba de Avaliações: visão signed-out reduzida (R12) — Avaliacoes vira -1, porte usa só a nota.
+		"id-G": paginaLugar("Doceria G", "4,2", "83977776666", "", false, false, [5]int{}, "", nil),
+		"id-B": paginaLugar("Doceria B", "4,0", "83988887777", "", false, true, [5]int{20, 5, 2, 2, 1}, "", nil),
+		"id-E": paginaLugar("Doceria E", "4,5", "83900001111", "", false, true, [5]int{60, 20, 10, 7, 3}, "", nil),
 	}
-	// mesmo id-A nos dois termos testa o dedup; id-E só existe pra provar que --limite 2 para antes de abri-lo.
+	// id-A duplicado nos dois termos testa o dedup; id-F (porta morta) testa erro isolado que não
+	// derruba a coleta; id-E só existe pra provar que --limite 3 para antes de abri-lo.
 	feeds := map[string]string{
-		"confeitaria em Manaíra, João Pessoa - PB": feedHTML(feedItem("id-C", "Confeitaria Fechada"), feedItem("id-A", "Doceria A"), feedItem("id-D", "Confeitaria Sem Celular")),
-		"doceria em Manaíra, João Pessoa - PB":     feedHTML(feedItem("id-A", "Doceria A"), feedItem("id-B", "Doceria B"), feedItem("id-E", "Doceria E")),
+		"confeitaria em Manaíra, João Pessoa - PB": feedHTML(
+			feedItem("id-C", "Confeitaria Fechada"),
+			feedItemAbsoluto(urlMorta, "id-F", "Doceria F"),
+			feedItem("id-A", "Doceria A"),
+			feedItem("id-D", "Confeitaria Sem Celular"),
+		),
+		"doceria em Manaíra, João Pessoa - PB": feedHTML(
+			feedItem("id-A", "Doceria A"),
+			feedItem("id-G", "Doceria G"),
+			feedItem("id-B", "Doceria B"),
+			feedItem("id-E", "Doceria E"),
+		),
 	}
 
 	mux := http.NewServeMux()
@@ -144,10 +178,11 @@ func TestColetarFluxoCompleto(t *testing.T) {
 	conta := &custo.Conta{}
 	ctx, cancelNovo := maps.Novo(context.Background())
 	defer cancelNovo()
-	ctx, cancelTimeout := context.WithTimeout(ctx, 90*time.Second)
+	// mais folgado que antes: id-G (sem aba) come os 15s de timeout de produção do internal/maps.
+	ctx, cancelTimeout := context.WithTimeout(ctx, 150*time.Second)
 	defer cancelTimeout()
 
-	mc := &maps.Coletor{Base: mapsSrv.URL, Pausa: 0}
+	mc := &maps.Coletor{Base: mapsSrv.URL, Pausa: -1} // negativo desliga a pausa; zero cairia no padrão de produção (3-4s)
 	sc := &site.Checador{HTTP: siteProprio.Client(), PageSpeedBase: pageSpeed.URL, Chave: "", NotaMinima: 0.5}
 	lc := &llm.Cliente{Chave: "chave-teste", Base: openaiSrv.URL, HTTP: openaiSrv.Client(), Conta: conta}
 	r := rand.New(rand.NewPCG(1, 2))
@@ -155,7 +190,7 @@ func TestColetarFluxoCompleto(t *testing.T) {
 	leads, descartes, cm, err := coletar(ctx, mc, sc, lc, r, entrada{
 		Nicho:      "confeitaria",
 		Bairro:     "Manaíra",
-		Limite:     2,
+		Limite:     3,
 		Remetente:  "Daniel",
 		PreviewURL: "",
 	})
@@ -163,28 +198,28 @@ func TestColetarFluxoCompleto(t *testing.T) {
 		t.Fatalf("coletar: %v", err)
 	}
 
-	// mesmo lugar em dois termos sai 1 vez, e --limite 2 para de abrir depois de 2 qualificados.
+	// mesmo lugar em dois termos sai 1 vez, e --limite 3 para de abrir depois de 3 qualificados (A, G, B).
 	if aberturas["id-A"] != 1 {
 		t.Errorf("aberturas[id-A] = %d, want 1 (dedup entre termos)", aberturas["id-A"])
 	}
 	if aberturas["id-E"] != 0 {
-		t.Errorf("id-E foi aberto; limite=2 já tinha sido atingido em id-A e id-B")
+		t.Errorf("id-E foi aberto; limite=3 já tinha sido atingido em id-A, id-G e id-B")
 	}
 	if cm.Buscas != 2 {
 		t.Errorf("cm.Buscas = %d, want 2", cm.Buscas)
 	}
-	if cm.LugaresAbertos != 4 {
-		t.Errorf("cm.LugaresAbertos = %d, want 4 (C, A, D, B)", cm.LugaresAbertos)
+	if cm.LugaresAbertos != 6 {
+		t.Errorf("cm.LugaresAbertos = %d, want 6 (C, F, A, D, G, B — E não conta)", cm.LugaresAbertos)
 	}
 
-	// lugar fechado (id-C) ou sem celular (id-D) não gastam avaliação: só quem passou no porte (A, B) chama a LLM.
-	if len(corposLLM) != 2 {
-		t.Fatalf("chamadas à LLM = %d, want 2 (só id-A e id-B passaram no porte)", len(corposLLM))
+	// só quem passou no porte (A, G, B) chama a LLM — fechado/sem celular/erro isolado não gastam avaliação.
+	if len(corposLLM) != 3 {
+		t.Fatalf("chamadas à LLM = %d, want 3 (id-A, id-G e id-B passaram no porte)", len(corposLLM))
 	}
 
-	// descartes: id-C (fechado) e id-D (sem celular), antes de custar qualquer avaliação.
-	if len(descartes) != 2 {
-		t.Fatalf("descartes = %+v, want 2", descartes)
+	// descartes: id-C (fechado), id-F (erro isolado ao abrir — não é captcha, não derruba a coleta) e id-D (sem celular).
+	if len(descartes) != 3 {
+		t.Fatalf("descartes = %+v, want 3", descartes)
 	}
 	motivos := map[string]string{}
 	for _, d := range descartes {
@@ -196,25 +231,36 @@ func TestColetarFluxoCompleto(t *testing.T) {
 	if motivos["Confeitaria Sem Celular"] != "sem celular" {
 		t.Errorf("motivo de Confeitaria Sem Celular = %q, want \"sem celular\"", motivos["Confeitaria Sem Celular"])
 	}
+	if !strings.HasPrefix(motivos["Doceria F"], "erro:") {
+		t.Errorf("motivo de Doceria F = %q, want prefixo \"erro:\" (Abrir falhou, não é captcha, a coleta segue)", motivos["Doceria F"])
+	}
 
-	// leads qualificados: A e B, ordenados por pontuação (A tem mais avaliações e nota maior).
-	if len(leads) != 2 {
-		t.Fatalf("leads = %+v, want 2", leads)
+	if len(leads) != 3 {
+		t.Fatalf("leads = %+v, want 3", leads)
 	}
-	if leads[0].PlaceID != "id-A" || leads[1].PlaceID != "id-B" {
-		t.Errorf("ordem dos leads = [%s %s], want [id-A id-B] (pontuação desc)", leads[0].PlaceID, leads[1].PlaceID)
+	porID := map[string]lead.Lead{}
+	for _, l := range leads {
+		porID[l.PlaceID] = l
 	}
-	if leads[0].Pontuacao < leads[1].Pontuacao {
-		t.Errorf("leads não ordenados por pontuação desc: %+v", leads)
+	for i := 1; i < len(leads); i++ {
+		if leads[i-1].Pontuacao < leads[i].Pontuacao {
+			t.Errorf("leads não ordenados por pontuação desc: %+v", leads)
+		}
 	}
 
 	// PageSpeed fora do ar não descarta o lead: id-A segue vivo (com a dor de reclamação vinda da LLM).
-	leadA := leads[0]
+	leadA, ok := porID["id-A"]
+	if !ok {
+		t.Fatal("id-A não qualificou")
+	}
 	if len(leadA.Dores) != 1 || leadA.Dores[0] != lead.Reclamacao {
 		t.Errorf("Dores de id-A = %v, want [reclamacao]", leadA.Dores)
 	}
 	if leadA.Telefone != "5583998765432" {
 		t.Errorf("Telefone de id-A = %q, want 5583998765432", leadA.Telefone)
+	}
+	if leadA.Avaliacoes != 100 {
+		t.Errorf("Avaliacoes de id-A = %d, want 100 (soma do histograma da aba)", leadA.Avaliacoes)
 	}
 	if leadA.Detalhes[lead.Reclamacao] != "demora pra responder no whatsapp" {
 		t.Errorf("Detalhes[reclamacao] de id-A = %q", leadA.Detalhes[lead.Reclamacao])
@@ -235,13 +281,27 @@ func TestColetarFluxoCompleto(t *testing.T) {
 		t.Errorf("corpo da 1ª chamada à LLM contém a avaliação positiva (só as negativas deviam ir): %s", corpoA)
 	}
 
+	// R12: id-G não tem aba de Avaliações → Avaliacoes -1, mas qualifica pelo porte só na nota (4,2 >= 4,0).
+	leadG, ok := porID["id-G"]
+	if !ok {
+		t.Fatal("id-G não qualificou (R12: devia passar no porte só pela nota, sem contagem de avaliações)")
+	}
+	if leadG.Avaliacoes != -1 {
+		t.Errorf("Avaliacoes de id-G = %d, want -1 (desconhecida, sem aba)", leadG.Avaliacoes)
+	}
+	if len(leadG.Dores) != 1 || leadG.Dores[0] != lead.SemSite {
+		t.Errorf("Dores de id-G = %v, want [sem_site]", leadG.Dores)
+	}
 	// a LLM precisa saber que "sem_site" já foi detectado antes dela (doc de llm.Entrada.Dores).
 	if !strings.Contains(string(corposLLM[1]), "sem_site") {
-		t.Errorf("corpo da 2ª chamada à LLM não menciona sem_site: %s", corposLLM[1])
+		t.Errorf("corpo da 2ª chamada à LLM (id-G) não menciona sem_site: %s", corposLLM[1])
 	}
 
 	// gancho vazio da LLM (id-B) cai no GanchoPadrao da dor de maior peso (R2): SemSite.
-	leadB := leads[1]
+	leadB, ok := porID["id-B"]
+	if !ok {
+		t.Fatal("id-B não qualificou")
+	}
 	if len(leadB.Dores) != 1 || leadB.Dores[0] != lead.SemSite {
 		t.Errorf("Dores de id-B = %v, want [sem_site]", leadB.Dores)
 	}
@@ -257,7 +317,7 @@ func TestColetarFluxoCompleto(t *testing.T) {
 	var buf strings.Builder
 	imprimir(&buf, leads, descartes, *conta, cm)
 	saida := buf.String()
-	for _, precisa := range []string{"Doceria A", "Doceria B", "fechado", "sem celular", "Maps: 2 buscas, 4 lugares abertos"} {
+	for _, precisa := range []string{"Doceria A", "Doceria B", "Doceria G", "fechado", "sem celular", "(?)", "Maps: 2 buscas, 6 lugares abertos"} {
 		if !strings.Contains(saida, precisa) {
 			t.Errorf("saída impressa não contém %q:\n%s", precisa, saida)
 		}
@@ -280,7 +340,7 @@ func TestColetarCaptchaAborta(t *testing.T) {
 	ctx, cancelTimeout := context.WithTimeout(ctx, 30*time.Second)
 	defer cancelTimeout()
 
-	mc := &maps.Coletor{Base: srv.URL, Pausa: 0}
+	mc := &maps.Coletor{Base: srv.URL, Pausa: -1}
 	r := rand.New(rand.NewPCG(1, 2))
 
 	_, _, _, err := coletar(ctx, mc, nil, nil, r, entrada{Nicho: "confeitaria", Bairro: "Manaíra", Limite: 2, Remetente: "Daniel"})
