@@ -8,6 +8,15 @@ func comAwaitPromise(p *runtime.EvaluateParams) *runtime.EvaluateParams {
 	return p.WithAwaitPromise(true)
 }
 
+// selFeed, selH1 e selAbaAvaliacoes são os seletores que o chromedp usa direto (WaitVisible/Click),
+// fora dos scripts JS abaixo — mas moram aqui pelo mesmo motivo: um só lugar pra ajustar quando o
+// Google mudar o layout.
+const selFeed = `div[role="feed"]`
+const selH1 = `h1`
+const selAbaAvaliacoes = `button[role="tab"][aria-label^="Avaliações"]`
+
+const jsTextoDoBody = `document.body ? document.body.innerText : ""`
+
 const jsExtrairResultados = `
 Array.from(document.querySelectorAll('div[role="feed"] a[href*="/maps/place/"]')).map(function(a){
   return {href: a.getAttribute("href") || "", nome: a.getAttribute("aria-label") || ""};

@@ -11,6 +11,29 @@ import (
 	"time"
 )
 
+func TestPausar(t *testing.T) {
+	casos := []struct {
+		base     time.Duration
+		min, max time.Duration // intervalo [min, max); min == max exige igualdade exata
+	}{
+		{0, PausaPadrao, PausaPadrao + time.Second},
+		{-1, 0, 0},
+		{5 * time.Second, 5 * time.Second, 6 * time.Second},
+	}
+	for _, c := range casos {
+		got := pausar(c.base)
+		if c.min == c.max {
+			if got != c.min {
+				t.Errorf("pausar(%v) = %v, want %v", c.base, got, c.min)
+			}
+			continue
+		}
+		if got < c.min || got >= c.max {
+			t.Errorf("pausar(%v) = %v, want em [%v, %v)", c.base, got, c.min, c.max)
+		}
+	}
+}
+
 // temChrome cobre os dois jeitos comuns de achar o binário: no PATH (Linux) ou o .app do macOS.
 func temChrome() bool {
 	for _, nome := range []string{"google-chrome", "google-chrome-stable", "chromium", "chromium-browser"} {
@@ -95,7 +118,7 @@ func TestColetorComFixture(t *testing.T) {
 	ctx, cancelTimeout := context.WithTimeout(ctx, 60*time.Second)
 	defer cancelTimeout()
 
-	c := &Coletor{Base: srv.URL, Pausa: 0}
+	c := &Coletor{Base: srv.URL, Pausa: -1} // negativo desliga a pausa; zero agora cai no padrão de 3-4s
 
 	t.Run("busca ate atingir o max", func(t *testing.T) {
 		resultados, err := c.Buscar(ctx, "confeitaria em Manaíra", 2)
@@ -232,5 +255,14 @@ func TestMapsAoVivo(t *testing.T) {
 	}
 	if lugar.Avaliacoes == 0 {
 		t.Error("Avaliacoes vazia")
+	}
+
+	resumo, negativas, err := c.AvaliacoesDoAberto(ctx)
+	if err != nil {
+		t.Fatalf("AvaliacoesDoAberto: %v", err)
+	}
+	t.Logf("resumo: %d chars, negativas: %d avaliações", len(resumo), len(negativas))
+	if resumo == "" && len(negativas) == 0 {
+		t.Error("nem resumo do Gemini nem avaliação negativa: extração de avaliações provavelmente quebrou")
 	}
 }

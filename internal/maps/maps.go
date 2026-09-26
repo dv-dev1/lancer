@@ -38,7 +38,8 @@ type Lugar struct {
 }
 
 type Coletor struct {
-	Base  string
+	Base string
+	// Pausa zero usa o padrão (PausaPadrao + sorteio); negativo desliga a pausa (só em teste).
 	Pausa time.Duration
 }
 
@@ -49,10 +50,15 @@ func (c *Coletor) base() string {
 	return c.Base
 }
 
-// pausar soma até 1s de sorteio à pausa configurada; Pausa zero (usado nos testes) não pausa nada.
+// pausar soma até 1s de sorteio à pausa configurada. Zero (Coletor{} não configurado) cai no
+// padrão de produção — esquecer de setar Pausa não pode desligar a única defesa contra captcha.
+// Negativo desliga a pausa de propósito: é o que os testes usam pra rodar rápido.
 func pausar(base time.Duration) time.Duration {
-	if base <= 0 {
+	if base < 0 {
 		return 0
+	}
+	if base == 0 {
+		base = PausaPadrao
 	}
 	return base + time.Duration(rand.Int64N(int64(time.Second)))
 }
@@ -72,7 +78,7 @@ func (c *Coletor) checarCaptcha(ctx context.Context) (bool, error) {
 	var urlAtual, texto string
 	if err := chromedp.Run(ctx,
 		chromedp.Location(&urlAtual),
-		chromedp.Evaluate(`document.body ? document.body.innerText : ""`, &texto),
+		chromedp.Evaluate(jsTextoDoBody, &texto),
 	); err != nil {
 		return false, err
 	}
@@ -101,7 +107,7 @@ func (c *Coletor) Buscar(ctx context.Context, consulta string, max int) ([]Resul
 	} else if capturado {
 		return nil, ErrCaptcha
 	}
-	if err := chromedp.Run(ctx, chromedp.WaitVisible(`div[role="feed"]`, chromedp.ByQuery)); err != nil {
+	if err := chromedp.Run(ctx, chromedp.WaitVisible(selFeed, chromedp.ByQuery)); err != nil {
 		return nil, err
 	}
 
@@ -186,7 +192,7 @@ func (c *Coletor) Abrir(ctx context.Context, destino string) (Lugar, error) {
 	} else if capturado {
 		return Lugar{}, ErrCaptcha
 	}
-	if err := chromedp.Run(ctx, chromedp.WaitVisible(`h1`, chromedp.ByQuery)); err != nil {
+	if err := chromedp.Run(ctx, chromedp.WaitVisible(selH1, chromedp.ByQuery)); err != nil {
 		return Lugar{}, err
 	}
 
@@ -221,7 +227,7 @@ type avaliacaoBruta struct {
 // AvaliacoesDoAberto vale para o lugar aberto por último (Abrir). Rola o painel de avaliações
 // 3 vezes: o número de itens carregados por rolagem varia e não vale a pena medir crescimento aqui.
 func (c *Coletor) AvaliacoesDoAberto(ctx context.Context) (string, []string, error) {
-	if err := chromedp.Run(ctx, chromedp.Click(`button[role="tab"][aria-label^="Avaliações"]`, chromedp.ByQuery)); err != nil {
+	if err := chromedp.Run(ctx, chromedp.Click(selAbaAvaliacoes, chromedp.ByQuery)); err != nil {
 		return "", nil, err
 	}
 	if err := chromedp.Run(ctx, chromedp.Sleep(esperaAposClique)); err != nil {
