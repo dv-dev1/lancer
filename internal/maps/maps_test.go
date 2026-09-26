@@ -62,11 +62,18 @@ func paginaLugar(comSite bool) string {
 	return `<html><body>
   <h1>Confeitaria Teste</h1>
   <span role="img" aria-label="4,5 estrelas">4,5</span>
-  <span aria-label="279 avaliações">279 avaliações</span>
   <button data-item-id="phone:tel:083991355466">(83) 99135-5466</button>
   ` + site + `
   <button data-item-id="address" aria-label="Endereço: Rua das Flores, 100 - Manaíra">Rua das Flores, 100</button>
   <button role="tab" aria-label="Avaliações">Avaliações</button>
+  <!-- sem contagem na visão geral: signed-out o Google só mostra no histograma, abaixo -->
+  <div>
+    <span aria-label="5 estrelas, 206 avaliações"></span>
+    <span aria-label="4 estrelas, 38 avaliações"></span>
+    <span aria-label="3 estrelas, 17 avaliações"></span>
+    <span aria-label="2 estrelas, 6 avaliações"></span>
+    <span aria-label="1 estrelas, 12 avaliações"></span>
+  </div>
   <div>
     <div>
       <div>

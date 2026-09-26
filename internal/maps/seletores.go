@@ -8,9 +8,7 @@ func comAwaitPromise(p *runtime.EvaluateParams) *runtime.EvaluateParams {
 	return p.WithAwaitPromise(true)
 }
 
-// selFeed, selH1 e selAbaAvaliacoes são os seletores que o chromedp usa direto (WaitVisible/Click),
-// fora dos scripts JS abaixo — mas moram aqui pelo mesmo motivo: um só lugar pra ajustar quando o
-// Google mudar o layout.
+// seletores usados direto pelo chromedp (WaitVisible/Click), fora dos scripts JS: mesmo motivo de morar aqui.
 const selFeed = `div[role="feed"]`
 const selH1 = `h1`
 const selAbaAvaliacoes = `button[role="tab"][aria-label^="Avaliações"]`
@@ -23,8 +21,7 @@ Array.from(document.querySelectorAll('div[role="feed"] a[href*="/maps/place/"]')
 })
 `
 
-// jsRolarFeedTpl rola o feed de resultados até o fim e espera %dms antes de contar de novo:
-// o próprio Google injeta mais itens de forma assíncrona depois do scroll.
+// rola o feed até o fim e espera %dms — o Google injeta mais itens de forma assíncrona.
 const jsRolarFeedTpl = `
 (function(){
   return new Promise(function(resolve){
@@ -38,18 +35,14 @@ const jsRolarFeedTpl = `
 })()
 `
 
+// sem contagem de avaliações aqui: signed-out o Google não mostra na visão geral, só no histograma da aba (jsContagemAvaliacoes).
 const jsExtrairLugar = `
 (function(){
   function attr(sel, nome){ var el = document.querySelector(sel); return el ? (el.getAttribute(nome) || "") : ""; }
-  var avaliacoesEl = Array.from(document.querySelectorAll("[aria-label]")).find(function(e){
-    var lbl = e.getAttribute("aria-label") || "";
-    return /avaliaç/i.test(lbl) && /^[0-9]/.test(lbl);
-  });
   var h1 = document.querySelector("h1");
   return {
     nome: h1 ? h1.textContent : "",
     notaTexto: attr('[role="img"][aria-label*="estrela"]', "aria-label"),
-    avaliacoesTexto: avaliacoesEl ? (avaliacoesEl.getAttribute("aria-label") || "") : "",
     telefoneItem: attr('button[data-item-id^="phone:tel:"]', "data-item-id"),
     site: attr('a[data-item-id="authority"]', "href"),
     endereco: attr('button[data-item-id="address"]', "aria-label").replace(/^Endereço:\s*/, ""),
@@ -58,7 +51,14 @@ const jsExtrairLugar = `
 })()
 `
 
-// acha o ancestral com scroll próprio do botão "Classificar avaliações": único jeito estável, já que as classes do Google mudam.
+// as 5 barras do histograma ("N estrelas, M avaliações"); somar as 5 (contagem() no Go) dá o total.
+const jsContagemAvaliacoes = `
+Array.from(document.querySelectorAll("[aria-label]")).map(function(e){ return e.getAttribute("aria-label") || ""; })
+  .filter(function(l){ return /^\d+\s*estrelas?,/i.test(l); })
+  .map(function(l){ return l.split(",")[1] || ""; })
+`
+
+// acha o ancestral com scroll do botão "Classificar avaliações": estável, ao contrário das classes.
 const jsAchaPainelRolavel = `
 function achaPainelRolavel(){
   var botao = document.querySelector('button[aria-label="Classificar avaliações"]');

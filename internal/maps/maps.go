@@ -19,6 +19,19 @@ const BaseGoogleMaps = "https://www.google.com"
 // PausaPadrao é o valor recomendado pra Coletor.Pausa fora de teste.
 const PausaPadrao = 3 * time.Second
 
+// timeoutElemento teta a espera de WaitVisible/Click: sem isso, um seletor que o Google não
+// mostra mais (layout mudou, ou a página é outra do que se esperava) trava a coleta pra sempre.
+// Ao vivo, subir esse valor não reduziu falha na aba Avaliações (achado no fix round 2: quando
+// falha, falha o teto inteiro, não uns segundos a mais — sinal de seletor ausente, não de lentidão).
+const timeoutElemento = 15 * time.Second
+
+// esperarClicar roda uma ação de espera/clique com teto próprio, sem depender do contexto do chamador ter deadline.
+func esperarClicar(ctx context.Context, acao chromedp.Action) error {
+	ctx, cancel := context.WithTimeout(ctx, timeoutElemento)
+	defer cancel()
+	return chromedp.Run(ctx, acao)
+}
+
 // esperaAposClique e esperaAposRolagem são vars (não const) pra os testes encolherem e o
 // fixture não levar minutos pra rodar.
 var (
@@ -107,7 +120,7 @@ func (c *Coletor) Buscar(ctx context.Context, consulta string, max int) ([]Resul
 	} else if capturado {
 		return nil, ErrCaptcha
 	}
-	if err := chromedp.Run(ctx, chromedp.WaitVisible(selFeed, chromedp.ByQuery)); err != nil {
+	if err := esperarClicar(ctx, chromedp.WaitVisible(selFeed, chromedp.ByQuery)); err != nil {
 		return nil, err
 	}
 
@@ -168,15 +181,17 @@ func resolverURL(base *url.URL, href string) string {
 }
 
 type lugarBruto struct {
-	Nome            string `json:"nome"`
-	NotaTexto       string `json:"notaTexto"`
-	AvaliacoesTexto string `json:"avaliacoesTexto"`
-	TelefoneItem    string `json:"telefoneItem"`
-	Site            string `json:"site"`
-	Endereco        string `json:"endereco"`
-	Fechado         bool   `json:"fechado"`
+	Nome         string `json:"nome"`
+	NotaTexto    string `json:"notaTexto"`
+	TelefoneItem string `json:"telefoneItem"`
+	Site         string `json:"site"`
+	Endereco     string `json:"endereco"`
+	Fechado      bool   `json:"fechado"`
 }
 
+// Abrir também clica na aba Avaliações antes de voltar: é lá, no histograma de estrelas, que a
+// contagem de avaliações aparece pra quem não está logado (a visão geral não mostra). Por isso
+// AvaliacoesDoAberto, chamada logo depois, não precisa clicar de novo.
 func (c *Coletor) Abrir(ctx context.Context, destino string) (Lugar, error) {
 	if p := pausar(c.Pausa); p > 0 {
 		if err := chromedp.Run(ctx, chromedp.Sleep(p)); err != nil {
@@ -192,7 +207,7 @@ func (c *Coletor) Abrir(ctx context.Context, destino string) (Lugar, error) {
 	} else if capturado {
 		return Lugar{}, ErrCaptcha
 	}
-	if err := chromedp.Run(ctx, chromedp.WaitVisible(selH1, chromedp.ByQuery)); err != nil {
+	if err := esperarClicar(ctx, chromedp.WaitVisible(selH1, chromedp.ByQuery)); err != nil {
 		return Lugar{}, err
 	}
 
@@ -206,6 +221,27 @@ func (c *Coletor) Abrir(ctx context.Context, destino string) (Lugar, error) {
 		return Lugar{}, err
 	}
 
+	if err := esperarClicar(ctx, chromedp.Click(selAbaAvaliacoes, chromedp.ByQuery)); err != nil {
+		return Lugar{}, err
+	}
+	if err := chromedp.Run(ctx, chromedp.Sleep(esperaAposClique)); err != nil {
+		return Lugar{}, err
+	}
+	if capturado, err := c.checarCaptcha(ctx); err != nil {
+		return Lugar{}, err
+	} else if capturado {
+		return Lugar{}, ErrCaptcha
+	}
+
+	var partesHistograma []string
+	if err := chromedp.Run(ctx, chromedp.Evaluate(jsContagemAvaliacoes, &partesHistograma)); err != nil {
+		return Lugar{}, err
+	}
+	avaliacoes := 0
+	for _, p := range partesHistograma {
+		avaliacoes += contagem(p)
+	}
+
 	return Lugar{
 		ID:         idDoLink(urlAtual),
 		Nome:       bruto.Nome,
@@ -214,7 +250,7 @@ func (c *Coletor) Abrir(ctx context.Context, destino string) (Lugar, error) {
 		Site:       bruto.Site,
 		Fechado:    bruto.Fechado,
 		Nota:       nota(bruto.NotaTexto),
-		Avaliacoes: contagem(bruto.AvaliacoesTexto),
+		Avaliacoes: avaliacoes,
 	}, nil
 }
 
@@ -224,21 +260,11 @@ type avaliacaoBruta struct {
 	Texto    string `json:"texto"`
 }
 
-// AvaliacoesDoAberto vale para o lugar aberto por último (Abrir). Rola o painel de avaliações
-// 3 vezes: o número de itens carregados por rolagem varia e não vale a pena medir crescimento aqui.
+// AvaliacoesDoAberto exige que Abrir tenha sido chamada logo antes pro mesmo lugar: é o Abrir que
+// clica na aba Avaliações (precisa do histograma de lá pra contar avaliações), então aqui não
+// clica de novo. Rola o painel de avaliações 3 vezes: o número de itens carregados por rolagem
+// varia e não vale a pena medir crescimento aqui.
 func (c *Coletor) AvaliacoesDoAberto(ctx context.Context) (string, []string, error) {
-	if err := chromedp.Run(ctx, chromedp.Click(selAbaAvaliacoes, chromedp.ByQuery)); err != nil {
-		return "", nil, err
-	}
-	if err := chromedp.Run(ctx, chromedp.Sleep(esperaAposClique)); err != nil {
-		return "", nil, err
-	}
-	if capturado, err := c.checarCaptcha(ctx); err != nil {
-		return "", nil, err
-	} else if capturado {
-		return "", nil, ErrCaptcha
-	}
-
 	var resumo string
 	if err := chromedp.Run(ctx, chromedp.Evaluate(jsResumoGemini, &resumo)); err != nil {
 		return "", nil, err
