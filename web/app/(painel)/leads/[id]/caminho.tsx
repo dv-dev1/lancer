@@ -13,9 +13,9 @@ export function CaminhoEtapas({ id, etapa, saiuDe }: { id: string; etapa: string
     <form action={mudarEtapa} className="space-y-3">
       <input type="hidden" name="id" value={id} />
       <Etiqueta>Etapa</Etiqueta>
-      <ol className="flex flex-col gap-1.5 lg:flex-row lg:gap-1.5">
+      <ol className="flex flex-col gap-1.5 lg:flex-row lg:flex-wrap lg:gap-1">
         {ESCADA.map((degrau) => (
-          <li key={degrau} className="min-w-0 lg:flex-1">
+          <li key={degrau} className="min-w-0 lg:flex-auto">
             <Degrau etapa={degrau} atual={etapa === degrau} feito={alcancou(referencia, degrau)} />
           </li>
         ))}
@@ -34,7 +34,7 @@ function Degrau({ etapa, atual, feito }: { etapa: Etapa; atual: boolean; feito: 
       type="submit"
       name="etapa"
       value={etapa}
-      className={`block w-full min-w-0 break-words rounded-md border px-3 py-2 text-left text-sm transition-colors duration-150 lg:text-center ${
+      className={`block w-full min-w-0 break-words rounded-md border px-3 py-2 text-left text-sm lg:whitespace-nowrap lg:px-2 lg:text-[13px] transition-colors duration-150 lg:text-center ${
         atual
           ? 'border-acento text-acento'
           : feito
