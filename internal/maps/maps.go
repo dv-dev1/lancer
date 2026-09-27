@@ -82,7 +82,8 @@ func pausar(base time.Duration) time.Duration {
 }
 
 func Novo(ctx context.Context) (context.Context, context.CancelFunc, error) {
-	opts := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.Flag("lang", "pt-BR"))
+	// 60s em vez dos 20s padrão: Chrome frio no runner do CI, com dois pacotes subindo juntos, passa dos 20s.
+	opts := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.Flag("lang", "pt-BR"), chromedp.WSURLReadTimeout(60*time.Second))
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(ctx, opts...)
 	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
 	cancelar := func() {
