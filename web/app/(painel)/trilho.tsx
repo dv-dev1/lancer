@@ -31,7 +31,7 @@ export function Trilho({ fila, cobrar }: { fila: number; cobrar: number }) {
       </header>
       <nav
         aria-label="Seções"
-        className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-4 border-linha border-t bg-fundo pb-[env(safe-area-inset-bottom)] lg:static lg:flex lg:flex-col lg:gap-0.5 lg:border-t-0 lg:border-r lg:px-3 lg:py-5"
+        className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-5 border-linha border-t bg-fundo pb-[env(safe-area-inset-bottom)] lg:static lg:flex lg:flex-col lg:gap-0.5 lg:border-t-0 lg:border-r lg:px-3 lg:py-5"
       >
         <div className="hidden lg:mb-7 lg:block lg:px-3">
           <Marca />

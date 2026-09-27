@@ -84,10 +84,10 @@ func TestGravarDuasVezesNaoDuplica(t *testing.T) {
 	ctx := context.Background()
 	l := leadTeste("place-dup")
 
-	if err := b.Gravar(ctx, []lead.Lead{l}, nil); err != nil {
+	if err := b.Gravar(ctx, []lead.Lead{l}, nil, 0); err != nil {
 		t.Fatalf("1ª gravação: %v", err)
 	}
-	if err := b.Gravar(ctx, []lead.Lead{l}, nil); err != nil {
+	if err := b.Gravar(ctx, []lead.Lead{l}, nil, 0); err != nil {
 		t.Fatalf("2ª gravação: %v", err)
 	}
 
@@ -104,7 +104,7 @@ func TestJaVistosEnxergaLeadsEVistos(t *testing.T) {
 	b := abrirBancoTeste(t)
 	ctx := context.Background()
 
-	if err := b.Gravar(ctx, []lead.Lead{leadTeste("place-lead")}, []Descarte{{PlaceID: "place-descarte", Motivo: "fechado"}}); err != nil {
+	if err := b.Gravar(ctx, []lead.Lead{leadTeste("place-lead")}, []Descarte{{PlaceID: "place-descarte", Motivo: "fechado"}}, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -140,7 +140,7 @@ func TestMarcarPerdidosSoAposTresDiasSemResposta(t *testing.T) {
 		{"respondeu-1", "contatado", agora.Add(-4 * 24 * time.Hour), true}, // 4 dias mas respondeu: continua contatado
 	}
 	for _, c := range casos {
-		if err := b.Gravar(ctx, []lead.Lead{leadTeste(c.placeID)}, nil); err != nil {
+		if err := b.Gravar(ctx, []lead.Lead{leadTeste(c.placeID)}, nil, 0); err != nil {
 			t.Fatal(err)
 		}
 		var respondeuEm any

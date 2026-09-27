@@ -34,13 +34,19 @@ var prioridadeDor = []lead.Dor{lead.SemSite, lead.SiteAgregador, lead.SiteRuim, 
 // mensagemCaptcha é o texto exato que a coleta mostra quando o Google barra com captcha.
 const mensagemCaptcha = "Google pediu captcha — coleta parada; tente amanhã"
 
+// errCaptcha é sentinela: o coletor de plantão (--servir) precisa distinguir captcha, que para o dia, de outros erros.
+var errCaptcha = errors.New(mensagemCaptcha)
+
+const cidadePadrao = "João Pessoa"
+
 // maxPorBusca é o teto de resultados por termo de busca no feed do Maps.
 // ponytail: fixo em 20; sobe a constante se um nicho pedir mais que isso por termo.
 const maxPorBusca = 20
 
 type entrada struct {
 	Nicho      string
-	Bairro     string
+	Cidade     string // vazia = cidadePadrao
+	Bairro     string // vazio = a cidade inteira
 	Limite     int
 	Remetente  string
 	PreviewURL string
@@ -73,7 +79,7 @@ func erroSistemico(ctx context.Context, err error) error {
 		return fmt.Errorf("contexto da coleta cancelado ou expirado — coleta parada: %w", ctx.Err())
 	}
 	if errors.Is(err, maps.ErrCaptcha) {
-		return errors.New(mensagemCaptcha)
+		return errCaptcha
 	}
 	var erroLLM *llm.ErroStatus
 	if errors.As(err, &erroLLM) {
@@ -93,7 +99,7 @@ func coletar(ctx context.Context, mc *maps.Coletor, sc *site.Checador, lc *llm.C
 		return nil, nil, contagemMaps{}, fmt.Errorf("nicho %q inválido; use restaurante, confeitaria, loja ou servico", e.Nicho)
 	}
 
-	resultados, buscas, descartesBusca, err := buscarDeduplicados(ctx, mc, termos, e.Bairro)
+	resultados, buscas, descartesBusca, err := buscarDeduplicados(ctx, mc, termos, lugarDaBusca(e.Cidade, e.Bairro))
 	if err != nil {
 		return nil, nil, contagemMaps{}, err
 	}
@@ -181,7 +187,8 @@ func coletar(ctx context.Context, mc *maps.Coletor, sc *site.Checador, lc *llm.C
 			PlaceID:    res.ID,
 			Nome:       lugar.Nome,
 			Nicho:      e.Nicho,
-			Bairro:     e.Bairro,
+			Cidade:     cidadeOuPadrao(e.Cidade),
+			Bairro:     localDoLead(e.Cidade, e.Bairro),
 			Telefone:   celular,
 			Site:       lugar.Site,
 			Endereco:   lugar.Endereco,
@@ -199,6 +206,28 @@ func coletar(ctx context.Context, mc *maps.Coletor, sc *site.Checador, lc *llm.C
 
 	sort.Slice(leads, func(i, j int) bool { return leads[i].Pontuacao > leads[j].Pontuacao })
 	return leads, descartes, contagemMaps{Buscas: buscas, LugaresAbertos: abertos, JaVistos: jaVistos}, nil
+}
+
+func cidadeOuPadrao(cidade string) string {
+	if cidade == "" {
+		return cidadePadrao
+	}
+	return cidade
+}
+
+func lugarDaBusca(cidade, bairro string) string {
+	if bairro == "" {
+		return cidadeOuPadrao(cidade) + " - PB"
+	}
+	return bairro + ", " + cidadeOuPadrao(cidade) + " - PB"
+}
+
+// Sem bairro, o lead leva a cidade no campo bairro: o painel mostra esse campo como o lugar do lead.
+func localDoLead(cidade, bairro string) string {
+	if bairro == "" {
+		return cidadeOuPadrao(cidade)
+	}
+	return bairro
 }
 
 // filtrarJaVistos roda antes de qualquer mc.Abrir: quem já foi visto não custa navegação nenhuma.
@@ -235,13 +264,13 @@ func montarAvaliacoes(resumo string, negativas []string) []string {
 	return append(avaliacoes, negativas...)
 }
 
-func buscarDeduplicados(ctx context.Context, mc *maps.Coletor, termos []string, bairro string) ([]maps.Resultado, int, []descarte, error) {
+func buscarDeduplicados(ctx context.Context, mc *maps.Coletor, termos []string, lugar string) ([]maps.Resultado, int, []descarte, error) {
 	vistos := map[string]bool{}
 	var resultados []maps.Resultado
 	var descartes []descarte
 	buscas := 0
 	for _, termo := range termos {
-		consulta := fmt.Sprintf("%s em %s, João Pessoa - PB", termo, bairro)
+		consulta := fmt.Sprintf("%s em %s", termo, lugar)
 		encontrados, err := mc.Buscar(ctx, consulta, maxPorBusca)
 		buscas++
 		if err != nil {

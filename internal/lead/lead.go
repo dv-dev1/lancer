@@ -31,6 +31,7 @@ type Lead struct {
 	PlaceID    string
 	Nome       string
 	Nicho      string
+	Cidade     string
 	Bairro     string
 	Telefone   string
 	Site       string

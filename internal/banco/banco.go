@@ -62,7 +62,8 @@ func (b *Banco) JaVistos(ctx context.Context, ids []string) (map[string]bool, er
 	return vistos, linhas.Err()
 }
 
-func (b *Banco) Gravar(ctx context.Context, leads []lead.Lead, descartes []Descarte) error {
+// pedido 0 = coleta do terminal, sem pedido do painel.
+func (b *Banco) Gravar(ctx context.Context, leads []lead.Lead, descartes []Descarte, pedido int64) error {
 	tx, err := b.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("banco: Gravar: %w", err)
@@ -83,10 +84,10 @@ func (b *Banco) Gravar(ctx context.Context, leads []lead.Lead, descartes []Desca
 			return fmt.Errorf("banco: Gravar: detalhes de %s: %w", l.PlaceID, err)
 		}
 		_, err = tx.Exec(ctx, `
-			insert into leads (place_id, slug, nicho, bairro, nome, telefone, site, endereco, nota, avaliacoes, dores, detalhes, pontuacao, variante, mensagem)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+			insert into leads (place_id, slug, nicho, cidade, bairro, nome, telefone, site, endereco, nota, avaliacoes, dores, detalhes, pontuacao, variante, mensagem, pedido_id)
+			values ($1, $2, $3, coalesce(nullif($4, ''), 'João Pessoa'), $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, nullif($17, 0))
 			on conflict (place_id) do nothing
-		`, l.PlaceID, l.Slug, l.Nicho, l.Bairro, l.Nome, l.Telefone, l.Site, l.Endereco, l.Nota, avaliacoes, dores, detalhes, l.Pontuacao, string(l.Variante), l.Mensagem)
+		`, l.PlaceID, l.Slug, l.Nicho, l.Cidade, l.Bairro, l.Nome, l.Telefone, l.Site, l.Endereco, l.Nota, avaliacoes, dores, detalhes, l.Pontuacao, string(l.Variante), l.Mensagem, pedido)
 		if err != nil {
 			return fmt.Errorf("banco: Gravar: lead %s: %w", l.PlaceID, err)
 		}

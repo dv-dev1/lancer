@@ -648,3 +648,20 @@ func TestColetarNichoInvalido(t *testing.T) {
 		t.Fatal("esperava erro para nicho inválido")
 	}
 }
+
+func TestLugarDaBusca(t *testing.T) {
+	casos := []struct{ cidade, bairro, busca, local string }{
+		{"", "Manaíra", "Manaíra, João Pessoa - PB", "Manaíra"},
+		{"Campina Grande", "", "Campina Grande - PB", "Campina Grande"},
+		{"Campina Grande", "Catolé", "Catolé, Campina Grande - PB", "Catolé"},
+		{"", "", "João Pessoa - PB", "João Pessoa"},
+	}
+	for _, c := range casos {
+		if got := lugarDaBusca(c.cidade, c.bairro); got != c.busca {
+			t.Errorf("lugarDaBusca(%q, %q) = %q, quero %q", c.cidade, c.bairro, got, c.busca)
+		}
+		if got := localDoLead(c.cidade, c.bairro); got != c.local {
+			t.Errorf("localDoLead(%q, %q) = %q, quero %q", c.cidade, c.bairro, got, c.local)
+		}
+	}
+}

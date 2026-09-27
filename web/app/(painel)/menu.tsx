@@ -10,6 +10,7 @@ const SECOES: { href: string; rotulo: string; contagem?: keyof Contagens }[] = [
   { href: '/cobrar', rotulo: 'Cobrar', contagem: 'cobrar' },
   { href: '/leads', rotulo: 'Leads' },
   { href: '/metricas', rotulo: 'Métricas' },
+  { href: '/buscar', rotulo: 'Buscar' },
 ]
 
 // Um DOM só: no celular cada link é uma célula da barra inferior; do lg para cima, uma linha do trilho.

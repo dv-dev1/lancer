@@ -54,3 +54,19 @@ create table if not exists custos (
     usd numeric not null default 0,
     primary key (dia, api)
 );
+
+-- pedidos de coleta feitos pelo painel; o coletor de plantão (coleta --servir) os pega um por vez.
+create table if not exists pedidos (
+    id bigserial primary key,
+    cidade text not null,
+    bairro text not null default '',
+    nicho text not null,
+    limite int not null check (limite between 1 and 20),
+    estado text not null default 'pendente' check (estado in ('pendente', 'rodando', 'pronto', 'erro')),
+    novos int,
+    erro text,
+    criado_em timestamptz not null default now(),
+    terminado_em timestamptz
+);
+alter table leads add column if not exists cidade text not null default 'João Pessoa';
+alter table leads add column if not exists pedido_id bigint references pedidos (id);

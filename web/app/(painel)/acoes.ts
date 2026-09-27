@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { RedirectType, redirect } from 'next/navigation'
 import { sql } from '@/lib/db.ts'
 import { exigirSessao } from '@/lib/guarda.ts'
+import { validarPedido } from '@/lib/pedidos.ts'
 import { destinoSeguro } from '@/lib/sessao.ts'
 import { alcancou, ETAPAS } from '@/lib/tipos.ts'
 
@@ -45,4 +46,14 @@ export async function marcarFollowUp(form: FormData) {
   await sql()`update leads set follow_up_em = now() where id = ${id} and respondeu_em is null`
   revalidatePath('/', 'layout')
   redirect(destinoSeguro(form.get('depois') ?? '/cobrar'), RedirectType.replace)
+}
+
+export async function pedirColeta(form: FormData) {
+  await exigirSessao()
+  const r = validarPedido(form)
+  if ('erro' in r) redirect(`/buscar?erro=${encodeURIComponent(r.erro)}`, RedirectType.replace)
+  const { cidade, bairro, nicho, limite } = r.pedido
+  await sql()`insert into pedidos (cidade, bairro, nicho, limite) values (${cidade}, ${bairro}, ${nicho}, ${limite})`
+  revalidatePath('/buscar')
+  redirect('/buscar', RedirectType.replace)
 }

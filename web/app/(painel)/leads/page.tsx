@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic'
 export const metadata: Metadata = { title: 'Leads' }
 
 type Filtro = string | string[] | undefined
-type Filtros = { nicho?: Filtro; variante?: Filtro; dor?: Filtro; aba?: Filtro }
+type Filtros = { nicho?: Filtro; variante?: Filtro; dor?: Filtro; aba?: Filtro; pedido?: Filtro }
 
 const primeiro = (v: Filtro) => (Array.isArray(v) ? v[0] : v) || null
 
@@ -25,6 +25,7 @@ export default async function Leads({ searchParams }: { searchParams: Promise<Fi
   const nicho = primeiro(f.nicho)
   const variante = primeiro(f.variante)
   const dor = primeiro(f.dor)
+  const pedido = /^\d+$/.test(primeiro(f.pedido) ?? '') ? primeiro(f.pedido) : null
   const [porEtapaBruto, leads, nichos] = await Promise.all([
     // Mesmo filtro da consulta de cartões (nicho/variante/dor): senão a contagem do topo da coluna
     // e a aba padrão do celular (abaAtual) ficam olhando para o total sem filtro.
@@ -32,6 +33,7 @@ export default async function Leads({ searchParams }: { searchParams: Promise<Fi
       where (${nicho}::text is null or nicho = ${nicho})
         and (${variante}::text is null or variante = ${variante})
         and (${dor}::text is null or ${dor} = any(dores))
+        and (${pedido}::bigint is null or pedido_id = ${pedido})
       group by etapa`,
     // O limit corta quantos cartões aparecem, não a contagem real de cada coluna (essa vem do group by acima).
     sql()`select id, nome, nicho, bairro, etapa, dores, pontuacao from leads
@@ -39,6 +41,7 @@ export default async function Leads({ searchParams }: { searchParams: Promise<Fi
         and (${nicho}::text is null or nicho = ${nicho})
         and (${variante}::text is null or variante = ${variante})
         and (${dor}::text is null or ${dor} = any(dores))
+        and (${pedido}::bigint is null or pedido_id = ${pedido})
       order by pontuacao desc limit 200`,
     sql()`select distinct nicho from leads order by nicho`,
   ])
@@ -63,6 +66,14 @@ export default async function Leads({ searchParams }: { searchParams: Promise<Fi
         <Chips grupo="Variante" chave="variante" opcoes={VARIANTE} f={f} />
         <Chips grupo="Dor" chave="dor" opcoes={DOR} f={f} />
       </nav>
+      {pedido && (
+        <p className="text-sm text-suave">
+          Só os leads da busca <span className="font-mono">#{pedido}</span> ·{' '}
+          <Link href={hrefComFiltro(f, { pedido: '' })} className="text-acento hover:underline">
+            ver todos
+          </Link>
+        </p>
+      )}
       <Quadro colunas={colunas} aba={aba} saidas={saidas} />
     </div>
   )

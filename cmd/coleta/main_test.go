@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// TestRunValidaFlags cobre o R-fecho-11: --bairro vazio e --limite <= 0 saem com código 2, antes de
+// TestRunValidaFlags cobre o R-fecho-11: --cidade vazia e --limite <= 0 saem com código 2, antes de
 // qualquer variável de ambiente ou Chrome — por isso só cobre os casos inválidos: um caso válido
 // chegaria em maps.Novo (sobe Chrome de verdade), que este pacote de teste não pode fazer rodar.
 func TestRunValidaFlags(t *testing.T) {
@@ -16,7 +16,7 @@ func TestRunValidaFlags(t *testing.T) {
 		args []string
 		want int
 	}{
-		{"bairro vazio", []string{"coleta", "--nicho=confeitaria", "--bairro="}, 2},
+		{"cidade vazia", []string{"coleta", "--nicho=confeitaria", "--cidade="}, 2},
 		{"limite zero", []string{"coleta", "--nicho=confeitaria", "--bairro=Manaíra", "--limite=0"}, 2},
 		{"limite negativo", []string{"coleta", "--nicho=confeitaria", "--bairro=Manaíra", "--limite=-1"}, 2},
 	}
