@@ -1,91 +1,63 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { sql } from '@/lib/db.ts'
+import { abaAtual } from '@/lib/quadro.ts'
 import { DOR, ETAPA, VARIANTE } from '@/lib/rotulos.ts'
-import { Cabecalho, Selo, SeloEtapa } from '../ui.tsx'
+import { ESCADA } from '@/lib/tipos.ts'
+import { botao } from '../ui.tsx'
+import { type CartaoLead, type Coluna, Quadro, type Saida } from './quadro.tsx'
 
 export const dynamic = 'force-dynamic'
 export const metadata: Metadata = { title: 'Leads' }
 
 type Filtro = string | string[] | undefined
-type Filtros = { nicho?: Filtro; etapa?: Filtro; variante?: Filtro; dor?: Filtro }
+type Filtros = { nicho?: Filtro; variante?: Filtro; dor?: Filtro; aba?: Filtro }
 
 const primeiro = (v: Filtro) => (Array.isArray(v) ? v[0] : v) || null
+
+function hrefComFiltro(f: Filtros, patch: Partial<Record<keyof Filtros, string>>): string {
+  const q = new URLSearchParams(Object.entries({ ...f, ...patch }).filter(([, v]) => v) as [string, string][])
+  return q.size ? `/leads?${q}` : '/leads'
+}
 
 export default async function Leads({ searchParams }: { searchParams: Promise<Filtros> }) {
   const f = await searchParams
   const nicho = primeiro(f.nicho)
-  const etapa = primeiro(f.etapa)
   const variante = primeiro(f.variante)
   const dor = primeiro(f.dor)
-  const [leads, nichos] = await Promise.all([
-    sql()`select id, nome, nicho, bairro, etapa, variante, dores, pontuacao from leads
-      where (${nicho}::text is null or nicho = ${nicho})
-        and (${etapa}::text is null or etapa = ${etapa})
+  const [porEtapaBruto, leads, nichos] = await Promise.all([
+    sql()`select etapa, count(*)::int as n from leads group by etapa`,
+    // O limit corta quantos cartões aparecem, não a contagem real de cada coluna (essa vem do group by acima).
+    sql()`select id, nome, nicho, bairro, etapa, dores, pontuacao from leads
+      where etapa not in ('perdido', 'saiu')
+        and (${nicho}::text is null or nicho = ${nicho})
         and (${variante}::text is null or variante = ${variante})
         and (${dor}::text is null or ${dor} = any(dores))
       order by pontuacao desc limit 200`,
     sql()`select distinct nicho from leads order by nicho`,
   ])
+  const porEtapa = Object.fromEntries(porEtapaBruto.map((e) => [e.etapa as string, e.n as number]))
   const opcoesNicho = Object.fromEntries(nichos.map((n) => [n.nicho as string, n.nicho as string]))
+  const aba = abaAtual(primeiro(f.aba) ?? undefined, porEtapa)
+  const colunas: Coluna[] = ESCADA.map((etapa) => ({
+    etapa,
+    rotulo: ETAPA[etapa],
+    n: porEtapa[etapa] ?? 0,
+    href: hrefComFiltro(f, { aba: etapa }),
+    leads: (leads as CartaoLead[]).filter((l) => l.etapa === etapa),
+  }))
+  const saidas: Saida[] = ['perdido', 'saiu']
+    .map((etapa) => ({ etapa, rotulo: ETAPA[etapa], n: porEtapa[etapa] ?? 0 }))
+    .filter((s) => s.n > 0)
 
   return (
-    <div className="space-y-6">
-      <Cabecalho
-        titulo="Leads"
-        descricao={`${leads.length} ${leads.length === 1 ? 'lead' : 'leads'} · ordenados pela pontuação`}
-      />
-      <nav className="cartao surgir space-y-2.5 p-4">
+    <div className="space-y-4 p-4 lg:p-8">
+      <nav className="flex flex-wrap items-center gap-2.5">
         <Chips grupo="Nicho" chave="nicho" opcoes={opcoesNicho} f={f} />
-        <Chips grupo="Etapa" chave="etapa" opcoes={ETAPA} f={f} />
         <Chips grupo="Variante" chave="variante" opcoes={VARIANTE} f={f} />
         <Chips grupo="Dor" chave="dor" opcoes={DOR} f={f} />
       </nav>
-      <div className="cartao surgir overflow-x-auto">
-        <table className="w-full text-left text-sm">
-          <thead className="border-b border-borda text-xs uppercase tracking-widest text-suave">
-            <tr>
-              <th className="px-4 py-3 font-normal">Lead</th>
-              <th className="font-normal">Pontuação</th>
-              <th className="font-normal">Variante</th>
-              <th className="font-normal">Etapa</th>
-              <th className="hidden pr-4 font-normal md:table-cell">Dores</th>
-            </tr>
-          </thead>
-          <tbody>
-            {leads.map((l) => (
-              <tr
-                key={l.id}
-                className="relative border-b border-borda transition-colors duration-150 last:border-0 hover:bg-superficie"
-              >
-                <td className="px-4 py-3">
-                  {/* O after cobre a linha inteira: clicar em qualquer ponto abre a ficha. */}
-                  <Link
-                    className="font-medium text-white after:absolute after:inset-0 hover:text-ciano"
-                    href={`/leads/${encodeURIComponent(l.id)}`}
-                  >
-                    {l.nome}
-                  </Link>
-                  <div className="text-suave">
-                    {l.nicho} · {l.bairro}
-                  </div>
-                </td>
-                <td className="tabular-nums">{l.pontuacao}</td>
-                <td>
-                  <Selo>{VARIANTE[l.variante] ?? l.variante}</Selo>
-                </td>
-                <td>
-                  <SeloEtapa etapa={l.etapa} rotulo={ETAPA[l.etapa] ?? l.etapa} />
-                </td>
-                <td className="hidden pr-4 md:table-cell">
-                  {(l.dores as string[]).map((d) => DOR[d] ?? d).join(', ') || '—'}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {leads.length === 0 && <p className="py-10 text-center text-suave">Nenhum lead com esses filtros.</p>}
-      </div>
+      <Quadro colunas={colunas} aba={aba} saidas={saidas} />
     </div>
   )
 }
@@ -101,26 +73,21 @@ function Chips({
   opcoes: Record<string, string>
   f: Filtros
 }) {
-  const href = (valor: string) => {
-    const q = new URLSearchParams(Object.entries({ ...f, [chave]: valor }).filter(([, v]) => v) as [string, string][])
-    return q.size ? `/leads?${q}` : '/leads'
-  }
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <span className="w-20 text-xs uppercase tracking-widest text-suave">{grupo}</span>
-      {[['', 'Todas'], ...Object.entries(opcoes)].map(([valor, rotulo]) => (
-        <Link
-          key={valor}
-          href={href(valor)}
-          className={`rounded-full border px-3 py-1 text-xs transition-colors duration-150 ${
-            (f[chave] ?? '') === valor
-              ? 'botao-primario border-transparent'
-              : 'border-borda text-suave hover:border-ciano/40 hover:text-white'
-          }`}
-        >
-          {rotulo}
-        </Link>
-      ))}
+      <span className="w-20 text-apagado text-xs uppercase tracking-widest">{grupo}</span>
+      {[['', 'Todas'], ...Object.entries(opcoes)].map(([valor, rotulo]) => {
+        const ativo = (f[chave] ?? '') === valor
+        return (
+          <Link
+            key={valor}
+            href={hrefComFiltro(f, { [chave]: valor })}
+            className={botao(ativo ? 'primario' : 'secundario', 'h-8 px-3 text-xs')}
+          >
+            {rotulo}
+          </Link>
+        )
+      })}
     </div>
   )
 }

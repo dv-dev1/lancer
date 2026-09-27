@@ -29,30 +29,3 @@ export function Etiqueta({ children, id }: { children: React.ReactNode; id?: str
     </h2>
   )
 }
-
-const COR_ETAPA: Record<string, string> = {
-  fechado: 'border-positivo/40 text-positivo',
-  perdido: 'border-linha text-apagado',
-  saiu: 'border-linha text-apagado',
-}
-
-export function Cabecalho({ titulo, descricao }: { titulo: string; descricao?: string }) {
-  return (
-    <header className="space-y-1">
-      <h1 className="font-semibold text-2xl tracking-[-0.02em]">{titulo}</h1>
-      {descricao && <p className="text-sm text-suave">{descricao}</p>}
-    </header>
-  )
-}
-
-export function SeloEtapa({ etapa, rotulo }: { etapa: string; rotulo: string }) {
-  return <Selo cor={COR_ETAPA[etapa]}>{rotulo}</Selo>
-}
-
-export function Selo({ children, cor }: { children: React.ReactNode; cor?: string }) {
-  return (
-    <span className={`inline-block rounded-[4px] border px-2 py-0.5 text-xs ${cor ?? 'border-linha-forte text-suave'}`}>
-      {children}
-    </span>
-  )
-}
