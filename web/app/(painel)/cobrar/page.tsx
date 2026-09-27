@@ -15,7 +15,7 @@ async function marcarFollowUp(form: FormData) {
   'use server'
   await exigirSessao()
   const id = String(form.get('id'))
-  await sql()`update leads set follow_up_em = now() where id = ${id}`
+  await sql()`update leads set follow_up_em = now() where id = ${id} and respondeu_em is null`
   revalidatePath('/cobrar')
 }
 

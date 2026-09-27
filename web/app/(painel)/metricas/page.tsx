@@ -8,14 +8,17 @@ export const dynamic = 'force-dynamic'
 export const metadata: Metadata = { title: 'Métricas' }
 
 export default async function Metricas() {
-  const [etapas, leadsBrutos, [custo]] = await Promise.all([
+  const [etapas, saidas, leadsBrutos, [custo]] = await Promise.all([
     sql()`select etapa, count(*)::int as n from leads group by etapa`,
+    sql()`select case when respondeu_em is not null then 'respondeu' when contatado_em is not null then 'contatado'
+            else 'na_fila' end as degrau, count(*)::int as n
+          from leads where etapa in ('perdido', 'saiu') group by 1`,
     sql()`select variante, nicho, dores, contatado_em, respondeu_em from leads`,
     sql()`select coalesce(sum(usd), 0)::float as total from custos`,
   ])
   const leads = leadsBrutos as LeadParaMetrica[]
   const porEtapa = Object.fromEntries(etapas.map((e) => [e.etapa as string, e.n as number]))
-  const f = funil(porEtapa)
+  const f = funil(porEtapa, Object.fromEntries(saidas.map((s) => [s.degrau as string, s.n as number])))
   const fechados = porEtapa.fechado ?? 0
   const topoFunil = Math.max(1, f.degraus[0]?.n ?? 1)
 

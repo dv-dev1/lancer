@@ -23,18 +23,20 @@ export const VARIANTE: Record<string, string> = { texto: 'Texto', link: 'Link' }
 
 export type Degrau = { rotulo: string; n: number; conversao: number }
 
-// perdido e saiu são saída do funil, sem etapa seguinte. ponytail: os dois somam só no primeiro
-// degrau — nem todo saiu passou por abriu/respondeu antes, então não dá pra repor mais fundo na escada.
-export function funil(porEtapa: Record<string, number>): { degraus: Degrau[]; saidas: number } {
+// perdido e saiu não têm degrau próprio: quem saiu conta até o degrau mais fundo que alcançou (saidasPorDegrau, que a
+// query acha pelas datas). Somar tudo em na_fila subcontava contatado, porque todo perdido vem de contatado.
+export function funil(
+  porEtapa: Record<string, number>,
+  saidasPorDegrau: Record<string, number> = {},
+): { degraus: Degrau[]; saidas: number } {
   const escada = ETAPAS.filter((e) => e !== 'perdido' && e !== 'saiu')
   let acumulado = 0
   const n: number[] = Array(escada.length).fill(0)
   for (let i = escada.length - 1; i >= 0; i--) {
-    acumulado += porEtapa[escada[i]] ?? 0
+    acumulado += (porEtapa[escada[i]] ?? 0) + (saidasPorDegrau[escada[i]] ?? 0)
     n[i] = acumulado
   }
-  const saidas = (porEtapa.perdido ?? 0) + (porEtapa.saiu ?? 0)
-  n[0] += saidas
+  const saidas = Object.values(saidasPorDegrau).reduce((a, b) => a + b, 0)
   const degraus = escada.map((e, i) => {
     const base = n[Math.max(0, i - 1)]
     return { rotulo: ETAPA[e], n: n[i], conversao: base ? Math.round((n[i] / base) * 100) : 0 }
