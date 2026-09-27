@@ -1,8 +1,9 @@
 import Link from 'next/link'
+import type { ReactNode } from 'react'
 import type { Vizinhos } from '@/lib/mesa.ts'
 import { Etiqueta } from './ui.tsx'
 
-export type ItemFila = { id: string; nome: string; meta: string; pontuacao: number }
+export type ItemFila = { id: string; nome: string; meta: string | ReactNode; pontuacao: number }
 
 export const hrefLead = (base: string, id: string | null) => (id ? `${base}?lead=${id}` : null)
 

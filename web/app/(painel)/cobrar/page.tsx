@@ -32,7 +32,11 @@ export default async function Cobrar({ searchParams }: { searchParams: Promise<{
     id: l.id,
     nome: l.nome,
     pontuacao: l.pontuacao,
-    meta: `${rotuloDias(l.contatado_em, agora)} · ${l.bairro}`,
+    meta: (
+      <>
+        <span className="font-mono">{rotuloDias(l.contatado_em, agora)}</span> · {l.bairro}
+      </>
+    ),
   }))
 
   return (
@@ -43,7 +47,7 @@ export default async function Cobrar({ searchParams }: { searchParams: Promise<{
         hrefFicha={`/leads/${atual.id}`}
         extra={
           <span>
-            contatado <span className="text-texto">{rotuloDias(atual.contatado_em, agora)}</span>
+            contatado <span className="text-texto font-mono">{rotuloDias(atual.contatado_em, agora)}</span>
           </span>
         }
       >
