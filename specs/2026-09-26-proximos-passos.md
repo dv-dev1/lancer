@@ -1,50 +1,18 @@
 # Próximos passos
 
-Atualizado em 2026-09-26. A fase 1 (coleta no terminal) está na `main` (`942c0f3`), com CI verde. Este arquivo junta o que falta fazer e o que precisa estar pronto antes de cada passo. O detalhe de cada tarefa está no plano, `specs/2026-09-26-lancer.plano.md`, e os critérios de aceite na spec, `specs/2026-09-26-lancer.md`.
+Atualizado em 2026-09-27. A fase 1 (coleta no terminal) está na `main`, com CI verde, e a fase 2 (banco e painel) está pronta na branch `fase-2`. Este arquivo junta o que falta fazer e o que precisa estar pronto antes de cada passo. O detalhe de cada tarefa está no plano, `specs/2026-09-26-lancer.plano.md`, e os critérios de aceite na spec, `specs/2026-09-26-lancer.md`.
 
-## Fase 2 — banco e painel
+## Fase 2 — banco e painel (pronta na branch `fase-2`)
 
-### O que vamos fazer
+- **Banco:** database `lancer` no projeto Neon `neon-bronze-leaf`. A org Neon do Daniel é gerenciada pela Vercel e recusa projeto criado pelo CLI, por isso não houve projeto novo. O schema mora em `internal/banco/schema.sql` e a própria coleta o aplica.
+- **Dedupe entre dias:** a coleta pula quem já foi visto antes de abrir o Maps. A 2ª rodada em Manaíra mostrou `já vistos: 8` e não reabriu nenhum lugar da 1ª.
+- **Painel** (`web/`): fila com o botão wa.me, `/cobrar`, `/leads`, ficha com as pílulas de etapa e `/metricas`. Por enquanto roda só local (`cd web && npm run dev`); o deploy é da fase 3.
+- **Falta:** push da `fase-2` e merge na `main`, com ok do Daniel.
 
-1. **Rever a decisão D1 antes do schema.** Ela manda guardar só o `place_id` e buscar nome, site e nota ao vivo. A regra veio dos termos da Places API, que saiu do projeto (decisão D2). Com o Maps no navegador, buscar ao vivo significa abrir o Maps de novo a cada consulta do painel, o que aumenta o risco de captcha. A recomendação é guardar nome e telefone junto com o que derivamos.
-2. **T6 — banco e coleta persistente** (`db/schema.sql`, Go com `pgx/v5`):
-   - tabelas `leads`, `vistos`, `mensagens`, `visitas` e `custos`, com a etapa do funil em `leads` (`na_fila`, `contatado`, `abriu`, `respondeu`, `interessado`, `proposta`, `fechado`, `perdido`, `saiu`);
-   - a coleta pula o `place_id` que já está em `leads` ou em `vistos` **antes** de abrir a página no Maps, para não gastar navegação com quem já foi visto;
-   - grava o lead e o descarte, e `--dry-run` só imprime;
-   - no fim de cada rodada, quem passou 3 dias do follow-up sem responder vira `perdido`;
-   - teste com Postgres real, que só roda quando existe `DATABASE_URL`.
-3. **T7 — painel web** (`web/`, Next 16, partindo da base do painel da GeniAI: login, sessão, layout e `linkWhatsApp`):
-   - `/`: fila do dia por pontuação, com o botão "Abrir no WhatsApp";
-   - `/cobrar`: contatado há 3 dias ou mais, sem resposta e sem follow-up, com o texto pronto;
-   - `/leads` e `/leads/[id]`: filtros por nicho, etapa, variante e dor; ficha com dores, mensagens e as etapas manuais;
-   - `/metricas`: funil e taxa de resposta por variante, nicho e dor, sempre com o `n` ao lado.
+### Antes de mandar a primeira mensagem
 
-### O que precisa vir do Daniel
-
-| Item | Para quê | Como |
-|---|---|---|
-| `DATABASE_URL` | T6 e T7 | criar um projeto novo no Neon, plano Free (console.neon.tech → New project), copiar a connection string e colar em `~/lancer/.env` como `DATABASE_URL=` |
-| Decisão D1 | schema da T6 | guardar nome e telefone (recomendado) ou só o `place_id` |
-| Usuário e senha do painel | login do painel | escolher e colocar em `~/lancer/.env` como `DASHBOARD_USER=` e `DASHBOARD_PASSWORD=` |
-
-O `AUTH_SECRET` do painel é gerado localmente, sem ação do Daniel.
-
-### O que é revalidado antes de começar
-
-- Cota do plano Free do Neon, e se o cadastro pede cartão (a regra é custo zero).
-- Versão atual do `pgx/v5` e do Next 16 que a base da GeniAI usa.
-- Instalar as dependências (`go get github.com/jackc/pgx/v5` e `npm install` em `web/`) só com ok, porque instalar pacote é ação de faixa vermelha.
-
-### Aceite da fase 2
-
-```bash
-cd ~/lancer/web && npm test && npm run lint && npx tsc --noEmit && npm run build
-# verde
-cd ~/lancer && go run ./cmd/coleta --nicho confeitaria --bairro "Manaíra" --limite 5 && go run ./cmd/coleta --nicho confeitaria --bairro "Manaíra" --limite 5
-# a segunda rodada não abre de novo nenhum place_id da primeira
-```
-
-Depois, o painel local (`npm run dev`) mostra a fila, e o botão wa.me abre a mensagem certa.
+- A variante `link` ainda leva o texto literal `<preview>/p/<slug>`, porque o preview é da fase 3 (T9). Até lá, mande só lead da variante `texto`, ou apague a última frase antes de enviar.
+- Até a escuta existir (fase 3), o funil anda pelas pílulas da ficha e pelo botão "follow-up enviado" do `/cobrar`.
 
 ## Fase 3 — escuta, preview e deploy
 
@@ -85,13 +53,16 @@ Ponta a ponta, com o segundo número no papel de lead: enviar pelo wa.me do pain
 
 - **Contagem de avaliações.** No layout do Maps sem login a contagem vem como "(?)", e o porte usa só a nota (R12). Rever quando houver dado de resposta suficiente.
 - **Ajustes pequenos adiados:**
-  - slug com "--" quando o `place_id` tem hífen nos quatro últimos caracteres (o link funciona);
+  - slug com "--" quando o `place_id` tem hífen nos oito últimos caracteres (o link funciona);
   - falta teste do `Pontuar` com várias dores e teste de URL sem esquema;
   - `hostDe` engole o erro do `url.Parse`;
   - "lento no celular" trunca a nota em vez de arredondar;
   - `classificarESitear` sempre devolve erro `nil`;
   - a coleta de avaliações não para depois de juntar 10 negativas;
   - os testes mudam variáveis globais do pacote.
+- **Adiados na fase 2:**
+  - o custo do dia usa o fuso local (a VM vai rodar em `America/Fortaleza`);
+  - se `SomarCusto` falhar depois do `Gravar`, o custo daquela rodada se perde (fração de centavo);
+  - o funil só sabe de onde o lead saiu (`saiu_de`), não quando passou por cada degrau.
 - **CI:**
-  - as actions `checkout@v4` e `setup-go@v5` rodam em Node 20, que está obsoleto, e precisam subir de versão;
   - `ubuntu-latest` passa a ser Ubuntu 26 em 19/10/2026: conferir se o passo do AppArmor para o sandbox do Chrome continua valendo.
