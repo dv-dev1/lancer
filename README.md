@@ -53,6 +53,7 @@ Se o Google barrar a coleta com captcha, o comando para a rodada inteira com "Go
 | `LANCER_REMETENTE` | sim | nome usado na abertura da mensagem |
 | `LANCER_PREVIEW_URL` | não | base do link de preview; vazio vira o placeholder `<preview>/p/<slug>` |
 | `PAGESPEED_API_KEY` | não | PageSpeed Insights; ver abaixo |
+| `DATABASE_URL` | não | Postgres (Neon); vazio, ou com `--dry-run`, a coleta não lê nem grava banco |
 
 Faltando alguma obrigatória, o comando sai com erro nomeando qual falta.
 
@@ -75,6 +76,22 @@ Precisa de Chrome ou Chromium instalado (o `internal/maps` abre um headless loca
 
 A coleta grava os leads no Neon; o painel (`web/`, Next) lê as mesmas tabelas e mostra a fila do dia,
 a tela de cobrança, a lista de leads com filtros e as métricas de resposta por variante, nicho e dor.
+
+Com banco, quem já foi aberto (virou lead ou foi descartado por motivo que não muda) é pulado antes de abrir o
+Maps. Rodapé real de duas rodadas seguidas, mesmo nicho e bairro: os 8 lugares da 1ª (5 leads e 3 descartes)
+não são abertos de novo na 2ª.
+
+```
+$ go run ./cmd/coleta --nicho confeitaria --bairro "Manaíra" --limite 5   # 1ª rodada
+...
+Maps: 2 buscas, 8 lugares abertos (grátis)
+já vistos: 0
+
+$ go run ./cmd/coleta --nicho confeitaria --bairro "Manaíra" --limite 5   # 2ª rodada
+...
+Maps: 2 buscas, 6 lugares abertos (grátis)
+já vistos: 8
+```
 
 ```bash
 cd web && npm run dev
