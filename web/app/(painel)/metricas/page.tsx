@@ -25,10 +25,10 @@ export default async function Metricas() {
     <div className="max-w-[48rem] space-y-4 p-4 lg:p-10">
       <FaixaNumeros
         itens={[
-          { rotulo: 'Contatados', valor: String(t.contatados) },
-          { rotulo: 'Respondidos', valor: String(t.respondidos) },
-          { rotulo: 'Taxa de resposta', valor: t.taxa, n: t.contatados },
-          { rotulo: 'Custo por fechado', valor: custoPorFechado(custo.total, fechados) },
+          { rotulo: 'Contatados', valor: String(t.contatados), n: t.contatados },
+          { rotulo: 'Respondidos', valor: String(t.respondidos), n: t.contatados },
+          { rotulo: 'Taxa de resposta', valor: t.taxa, n: t.contatados, taxa: true },
+          { rotulo: 'Custo por fechado', valor: custoPorFechado(custo.total, fechados), n: fechados, taxa: true },
         ]}
       />
       <Funil degraus={f.degraus} saidas={f.saidas} />

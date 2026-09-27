@@ -26,7 +26,13 @@ export default async function Leads({ searchParams }: { searchParams: Promise<Fi
   const variante = primeiro(f.variante)
   const dor = primeiro(f.dor)
   const [porEtapaBruto, leads, nichos] = await Promise.all([
-    sql()`select etapa, count(*)::int as n from leads group by etapa`,
+    // Mesmo filtro da consulta de cartões (nicho/variante/dor): senão a contagem do topo da coluna
+    // e a aba padrão do celular (abaAtual) ficam olhando para o total sem filtro.
+    sql()`select etapa, count(*)::int as n from leads
+      where (${nicho}::text is null or nicho = ${nicho})
+        and (${variante}::text is null or variante = ${variante})
+        and (${dor}::text is null or ${dor} = any(dores))
+      group by etapa`,
     // O limit corta quantos cartões aparecem, não a contagem real de cada coluna (essa vem do group by acima).
     sql()`select id, nome, nicho, bairro, etapa, dores, pontuacao from leads
       where etapa not in ('perdido', 'saiu')

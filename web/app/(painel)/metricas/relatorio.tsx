@@ -4,8 +4,9 @@ import { Etiqueta } from '../ui.tsx'
 
 const BLOCO = 'rounded-md border border-linha bg-superficie p-5'
 
-function Amostra({ n }: { n: number }) {
-  const pequena = amostraPequena(n)
+// `destaque` liga o aviso coral: só faz sentido num número que é taxa/razão, não numa contagem crua.
+function Amostra({ n, destaque = true }: { n: number; destaque?: boolean }) {
+  const pequena = destaque && amostraPequena(n)
   return (
     <span className={`text-xs ${pequena ? 'text-aviso' : 'text-apagado'}`}>
       n={n}
@@ -14,14 +15,16 @@ function Amostra({ n }: { n: number }) {
   )
 }
 
-export function FaixaNumeros({ itens }: { itens: { rotulo: string; valor: string; n?: number }[] }) {
+type NumeroFaixa = { rotulo: string; valor: string; n: number; taxa?: boolean }
+
+export function FaixaNumeros({ itens }: { itens: NumeroFaixa[] }) {
   return (
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       {itens.map((it) => (
         <div key={it.rotulo} className={`${BLOCO} space-y-1`}>
           <p className="text-apagado text-xs uppercase tracking-widest">{it.rotulo}</p>
           <p className="font-mono text-2xl text-texto tabular-nums">{it.valor}</p>
-          {it.n !== undefined && <Amostra n={it.n} />}
+          <Amostra n={it.n} destaque={it.taxa === true} />
         </div>
       ))}
     </div>
