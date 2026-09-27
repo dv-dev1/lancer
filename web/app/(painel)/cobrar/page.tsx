@@ -1,77 +1,88 @@
 import type { Metadata } from 'next'
-import { revalidatePath } from 'next/cache'
 import Link from 'next/link'
-import { linkWhatsApp } from '@/lib/abordagem.ts'
-import { deveCobrar, TEXTO_FOLLOW_UP } from '@/lib/cobrar.ts'
-import { sql } from '@/lib/db.ts'
-import { exigirSessao } from '@/lib/guarda.ts'
-import { Cabecalho } from '../ui.tsx'
+import { deveCobrar, proximaCobranca, rotuloDias, TEXTO_FOLLOW_UP } from '@/lib/cobrar.ts'
+import { candidatosCobranca, tamanhoDaFila } from '@/lib/consultas.ts'
+import { seguinte, vizinhos } from '@/lib/mesa.ts'
+import { Despacho } from '../despacho.tsx'
+import { PainelFoco } from '../foco.tsx'
+import { ColunaFila, hrefLead, Mesa, TopoDeck, Vazio } from '../mesa.tsx'
+import { botao } from '../ui.tsx'
 
 export const dynamic = 'force-dynamic'
 export const metadata: Metadata = { title: 'Cobrar' }
 
-// R22: só marca o envio; quem tira o lead da régua (perdido, 3 dias depois) é o MarcarPerdidos do coletor.
-async function marcarFollowUp(form: FormData) {
-  'use server'
-  await exigirSessao()
-  const id = String(form.get('id'))
-  await sql()`update leads set follow_up_em = now() where id = ${id} and respondeu_em is null`
-  revalidatePath('/cobrar')
-}
+// O servidor pode rodar em UTC; a hora mostrada é a de João Pessoa.
+const DIA = new Intl.DateTimeFormat('pt-BR', {
+  weekday: 'long',
+  day: '2-digit',
+  month: '2-digit',
+  timeZone: 'America/Fortaleza',
+})
+const HORA = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Fortaleza' })
 
-type Candidato = {
-  // bigint vem do driver como string; o id só é usado como texto (href, input hidden), nunca em conta.
-  id: string | number
-  nome: string
-  telefone: string
-  contatado_em: string | null
-  respondeu_em: string | null
-  follow_up_em: string | null
-}
-
-export default async function Cobrar() {
-  // A régua dos 3 dias é o deveCobrar, não o SQL: a query só traz quem ainda pode entrar nela.
-  const candidatos = (await sql()`select id, nome, telefone, contatado_em, respondeu_em, follow_up_em from leads
-    where etapa in ('contatado', 'abriu') and contatado_em is not null and respondeu_em is null
-      and follow_up_em is null`) as Candidato[]
+export default async function Cobrar({ searchParams }: { searchParams: Promise<{ lead?: string | string[] }> }) {
+  const [{ lead }, candidatos] = await Promise.all([searchParams, candidatosCobranca()])
   const agora = new Date()
   const leads = candidatos.filter((l) => deveCobrar(l, agora))
+  const ids = leads.map((l) => l.id)
+  const v = vizinhos(ids, lead)
+  if (!v) return <CobrarVazio proxima={proximaCobranca(candidatos, agora)} esperando={candidatos.length} />
+  const atual = leads[v.posicao - 1]
+  const itens = leads.map((l) => ({
+    id: l.id,
+    nome: l.nome,
+    pontuacao: l.pontuacao,
+    meta: `${rotuloDias(l.contatado_em, agora)} · ${l.bairro}`,
+  }))
 
   return (
-    <div className="space-y-6">
-      <Cabecalho
-        titulo="Cobrar"
-        descricao={`${leads.length} ${leads.length === 1 ? 'lead' : 'leads'} sem resposta há 3 dias`}
-      />
-      <div className="cartao surgir divide-y divide-borda">
-        {leads.map((l) => (
-          <div key={l.id} className="flex flex-wrap items-center justify-between gap-4 p-4">
-            <Link className="font-medium text-white hover:text-ciano" href={`/leads/${encodeURIComponent(l.id)}`}>
-              {l.nome}
-            </Link>
-            <div className="flex items-center gap-2">
-              <a
-                className="botao-primario px-4 py-1.5 text-sm transition-[filter] duration-150 hover:brightness-110"
-                href={linkWhatsApp(l.telefone, TEXTO_FOLLOW_UP)}
-                target="_blank"
-                rel="noopener"
-              >
-                Abrir no WhatsApp
-              </a>
-              <form action={marcarFollowUp}>
-                <input type="hidden" name="id" value={l.id} />
-                <button
-                  type="submit"
-                  className="rounded-full border border-borda px-4 py-1.5 text-sm text-suave transition-colors duration-150 hover:text-white"
-                >
-                  Follow-up enviado
-                </button>
-              </form>
-            </div>
-          </div>
-        ))}
-        {leads.length === 0 && <p className="py-10 text-center text-suave">Nenhum lead para cobrar.</p>}
-      </div>
-    </div>
+    <Mesa coluna={<ColunaFila rotulo="Cobrar" base="/cobrar" itens={itens} atual={v.atual} />}>
+      <TopoDeck base="/cobrar" v={v} />
+      <PainelFoco
+        lead={atual}
+        hrefFicha={`/leads/${atual.id}`}
+        extra={
+          <span>
+            contatado <span className="text-texto">{rotuloDias(atual.contatado_em, agora)}</span>
+          </span>
+        }
+      >
+        <Despacho
+          key={atual.id}
+          modo="cobrar"
+          id={atual.id}
+          telefone={atual.telefone}
+          mensagem={TEXTO_FOLLOW_UP}
+          depois={hrefLead('/cobrar', seguinte(ids, v.atual)) ?? '/cobrar'}
+          anterior={hrefLead('/cobrar', v.anterior)}
+          proximo={hrefLead('/cobrar', v.proximo)}
+        />
+      </PainelFoco>
+    </Mesa>
+  )
+}
+
+async function CobrarVazio({ proxima, esperando }: { proxima: Date | null; esperando: number }) {
+  const fila = await tamanhoDaFila()
+  return (
+    <Vazio frase="Nada para cobrar agora.">
+      {proxima ? (
+        <p>
+          A próxima cobrança abre{' '}
+          <span className="text-texto">
+            {DIA.format(proxima)}, às <span className="font-mono">{HORA.format(proxima)}</span>
+          </span>
+          , quando o contato mais antigo completa 3 dias sem resposta.{' '}
+          {esperando === 1 ? '1 lead contatado está' : `${esperando} leads contatados estão`} nessa espera.
+        </p>
+      ) : (
+        <p>Nenhum lead contatado esperando resposta. A cobrança começa 3 dias depois do primeiro envio.</p>
+      )}
+      {fila > 0 && (
+        <Link href="/" className={botao('secundario')}>
+          Ir para a Fila <span className="font-mono">{fila}</span>
+        </Link>
+      )}
+    </Vazio>
   )
 }

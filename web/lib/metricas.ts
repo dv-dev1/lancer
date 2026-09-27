@@ -8,8 +8,18 @@ export type LeadParaMetrica = {
 
 export type Corte = { chave: string; n: number; respostas: number; taxa: string }
 
+export const AMOSTRA_MINIMA = 10
+
+export const amostraPequena = (n: number) => n < AMOSTRA_MINIMA
+
 export function taxa(respostas: number, n: number): string {
   return n === 0 ? '—' : `${Math.round((respostas / n) * 100)}%`
+}
+
+export function totais(leads: LeadParaMetrica[]): { contatados: number; respondidos: number; taxa: string } {
+  const contatados = leads.filter((l) => l.contatado_em)
+  const respondidos = contatados.filter((l) => l.respondeu_em).length
+  return { contatados: contatados.length, respondidos, taxa: taxa(respondidos, contatados.length) }
 }
 
 // Cada corte é uma pergunta separada sobre o mesmo lead: as dores não são exclusivas entre si.

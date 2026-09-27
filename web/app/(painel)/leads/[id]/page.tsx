@@ -1,33 +1,16 @@
 import type { Metadata } from 'next'
-import { revalidatePath } from 'next/cache'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { Fragment } from 'react'
 import { formatarTelefone, linkWhatsApp } from '@/lib/abordagem.ts'
 import { sql } from '@/lib/db.ts'
-import { exigirSessao } from '@/lib/guarda.ts'
 import { DOR, ETAPA, VARIANTE } from '@/lib/rotulos.ts'
-import { alcancou, ETAPAS } from '@/lib/tipos.ts'
+import { ETAPAS } from '@/lib/tipos.ts'
+import { mudarEtapa } from '../../acoes.ts'
 import { Selo, SeloEtapa } from '../../ui.tsx'
 
 export const dynamic = 'force-dynamic'
 export const metadata: Metadata = { title: 'Lead' }
-
-async function mudarEtapa(form: FormData) {
-  'use server'
-  await exigirSessao()
-  const id = String(form.get('id'))
-  const etapa = String(form.get('etapa'))
-  if (!(ETAPAS as readonly string[]).includes(etapa)) throw new Error(`etapa inválida: ${etapa}`)
-  // As datas só se preenchem uma vez (pílula clicada de novo não reseta), e pular degrau preenche os de trás.
-  // Na direita do set, `etapa` ainda é a antiga: saiu_de guarda de onde o lead saiu, para o funil.
-  await sql()`update leads set etapa = ${etapa},
-    contatado_em = case when ${alcancou(etapa, 'contatado')}::boolean then coalesce(contatado_em, now()) else contatado_em end,
-    respondeu_em = case when ${alcancou(etapa, 'respondeu')}::boolean then coalesce(respondeu_em, now()) else respondeu_em end,
-    saiu_de = case when ${etapa} in ('perdido', 'saiu') and etapa not in ('perdido', 'saiu') then etapa else saiu_de end
-    where id = ${id}`
-  revalidatePath(`/leads/${encodeURIComponent(id)}`)
-}
 
 export default async function FichaLead({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params

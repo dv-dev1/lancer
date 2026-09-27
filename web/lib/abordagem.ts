@@ -9,6 +9,10 @@ export function linkWhatsApp(telefone: string, texto: string): string {
   return `https://wa.me/${internacional(telefone)}?text=${encodeURIComponent(texto)}`
 }
 
+export function semPreview(mensagem: string): boolean {
+  return mensagem.includes('<preview>')
+}
+
 export function formatarTelefone(telefone: string): string {
   const m = internacional(telefone).match(/^55(\d{2})(\d{4,5})(\d{4})$/)
   return m ? `+55 ${m[1]} ${m[2]}-${m[3]}` : telefone

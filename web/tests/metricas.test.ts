@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { custoPorFechado, porDor, porNicho, porVariante, taxa } from '../lib/metricas.ts'
+import {
+  AMOSTRA_MINIMA,
+  amostraPequena,
+  custoPorFechado,
+  porDor,
+  porNicho,
+  porVariante,
+  taxa,
+  totais,
+} from '../lib/metricas.ts'
 
 test('taxa arredonda a porcentagem e não divide por zero', () => {
   assert.equal(taxa(1, 4), '25%')
@@ -49,4 +58,26 @@ test('custo por fechado dá — sem nenhum lead fechado, e divide certo quando h
     custoPorFechado(10, 2),
     (5).toLocaleString('pt-BR', { style: 'currency', currency: 'USD', minimumFractionDigits: 4 }),
   )
+})
+
+test('totais contam contatados e respondidos, com a taxa sobre os contatados', () => {
+  const leads = [
+    { variante: 'texto', nicho: 'confeitaria', dores: [], contatado_em: '2026-01-01', respondeu_em: '2026-01-02' },
+    { variante: 'link', nicho: 'confeitaria', dores: [], contatado_em: '2026-01-01', respondeu_em: null },
+    { variante: 'link', nicho: 'salao', dores: [], contatado_em: '2026-01-03', respondeu_em: null },
+    { variante: 'texto', nicho: 'salao', dores: [], contatado_em: null, respondeu_em: null },
+  ]
+  assert.deepEqual(totais(leads), { contatados: 3, respondidos: 1, taxa: '33%' })
+})
+
+test('resposta sem contato registrado não entra nos totais, como nos cortes', () => {
+  const leads = [{ variante: 'texto', nicho: 'salao', dores: [], contatado_em: null, respondeu_em: '2026-01-02' }]
+  assert.deepEqual(totais(leads), { contatados: 0, respondidos: 0, taxa: '—' })
+})
+
+test('amostra é pequena abaixo de 10 contatados e deixa de ser a partir de 10', () => {
+  assert.equal(AMOSTRA_MINIMA, 10)
+  assert.equal(amostraPequena(0), true)
+  assert.equal(amostraPequena(9), true)
+  assert.equal(amostraPequena(10), false)
 })

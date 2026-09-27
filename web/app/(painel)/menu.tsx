@@ -3,26 +3,35 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
-const ITENS = [
-  { href: '/', rotulo: 'Fila' },
-  { href: '/cobrar', rotulo: 'Cobrar' },
+type Contagens = { fila: number; cobrar: number }
+
+const SECOES: { href: string; rotulo: string; contagem?: keyof Contagens }[] = [
+  { href: '/', rotulo: 'Fila', contagem: 'fila' },
+  { href: '/cobrar', rotulo: 'Cobrar', contagem: 'cobrar' },
   { href: '/leads', rotulo: 'Leads' },
   { href: '/metricas', rotulo: 'Métricas' },
 ]
 
-export function Menu() {
+// Um DOM só: no celular cada link é uma célula da barra inferior; do lg para cima, uma linha do trilho.
+export function Menu({ contagens }: { contagens: Contagens }) {
   const rota = usePathname()
-  return ITENS.map(({ href, rotulo }) => {
+  return SECOES.map(({ href, rotulo, contagem }) => {
     const ativo = href === '/' ? rota === '/' : rota.startsWith(href)
     return (
       <Link
         key={href}
         href={href}
         aria-current={ativo ? 'page' : undefined}
-        className={`relative text-sm transition-colors duration-150 hover:text-white ${ativo ? 'text-white' : 'text-suave'}`}
+        className={`relative flex h-14 items-center justify-center gap-1.5 text-[13px] transition-colors duration-150 lg:h-9 lg:justify-between lg:rounded-md lg:px-3 lg:text-sm ${
+          ativo
+            ? 'text-acento before:absolute before:top-0 before:left-1/2 before:h-0.5 before:w-8 before:-translate-x-1/2 before:bg-acento lg:bg-elevada lg:before:hidden'
+            : 'text-suave hover:text-texto lg:hover:bg-superficie'
+        }`}
       >
         {rotulo}
-        {ativo && <span className="gradiente-marca absolute -bottom-[1.1rem] left-0 h-0.5 w-full rounded-full" />}
+        {contagem && (
+          <span className={`font-mono text-xs ${ativo ? 'text-acento' : 'text-apagado'}`}>{contagens[contagem]}</span>
+        )}
       </Link>
     )
   })

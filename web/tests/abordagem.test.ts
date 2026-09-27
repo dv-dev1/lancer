@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { formatarTelefone, linkWhatsApp } from '../lib/abordagem.ts'
+import { formatarTelefone, linkWhatsApp, semPreview } from '../lib/abordagem.ts'
 
 test('link do wa.me leva só os dígitos do telefone e o texto codificado', () => {
   assert.equal(linkWhatsApp('+55 (83) 8746-8188', 'Olá, Ana!'), 'https://wa.me/558387468188?text=Ol%C3%A1%2C%20Ana!')
@@ -15,4 +15,10 @@ test('telefone aparece no formato brasileiro', () => {
   assert.equal(formatarTelefone('5583991000137'), '+55 83 99100-0137')
   assert.equal(formatarTelefone('558387468188'), '+55 83 8746-8188')
   assert.equal(formatarTelefone('123'), '123')
+})
+
+test('mensagem com o link de preview ainda sem endereço é marcada, a de texto ou com link real não', () => {
+  assert.equal(semPreview('fiz um exemplo pra vocês: <preview>/p/doce-recanto'), true)
+  assert.equal(semPreview('oi, aqui é o Daniel, desenvolvedor aqui de João Pessoa.'), false)
+  assert.equal(semPreview('fiz um exemplo pra vocês: https://lancer.dev/p/doce-recanto'), false)
 })
