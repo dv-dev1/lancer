@@ -1,0 +1,7 @@
+# mesmas regras do .gitignore da raiz, mas aqui também: o biome (vcs.useIgnoreFile) só lê
+# ignore file na própria pasta do biome.json, não sobe até a raiz do repo.
+/node_modules
+/.next
+.env.local
+*.tsbuildinfo
+next-env.d.ts

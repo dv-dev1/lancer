@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+@theme {
+  --color-fundo: #010f17;
+  --color-superficie: rgb(255 255 255 / 0.05);
+  --color-borda: rgb(255 255 255 / 0.1);
+  --color-texto: #d9d9d9;
+  --color-suave: rgb(163 191 255 / 0.62);
+  --color-azul: #0099ff;
+  --color-ciano: #00c0fa;
+  --color-quente: #ff7a59;
+  --color-morno: #f5c451;
+  --color-frio: #0daadf;
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+  --radius-cartao: 18px;
+}
+
+.botao-primario {
+  background: linear-gradient(96deg, #0069ab 0%, #07afb5 150%);
+  border-radius: 100px;
+  color: #fff;
+}
+.gradiente-marca {
+  background: linear-gradient(90deg, #0daadf, #08fbd0);
+}
+.cartao {
+  background: var(--color-superficie);
+  border: 1px solid var(--color-borda);
+  border-radius: var(--radius-cartao);
+}
+
+.titulo-gradiente {
+  background: linear-gradient(90deg, #fff 35%, #00c0fa 140%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Animação curta e só na entrada: o painel é ferramenta de trabalho, não vitrine. */
+@media (prefers-reduced-motion: no-preference) {
+  .surgir {
+    animation: surgir 300ms ease-out both;
+  }
+  .crescer-x {
+    animation: crescer-x 700ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+}
+@keyframes surgir {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+@keyframes crescer-x {
+  from {
+    transform: scaleX(0);
+  }
+}

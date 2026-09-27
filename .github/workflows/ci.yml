@@ -26,3 +26,19 @@ jobs:
         run: |
           ! grep -rnE "places\.googleapis\.com|maps\.googleapis\.com|GOOGLE_MAPS_API_KEY" --include='*.go' .
           ! grep -E "cloud\.google\.com/go/maps|googlemaps" go.mod
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+      - run: npm ci
+      - run: npm test
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - run: npm run build

@@ -70,3 +70,15 @@ set -a && source .env && set +a && go run ./cmd/coleta --nicho confeitaria --bai
 `--nicho` aceita `restaurante`, `confeitaria`, `loja` ou `servico`. `--limite` é opcional, padrão 10.
 
 Precisa de Chrome ou Chromium instalado (o `internal/maps` abre um headless local); sem isso, os testes de ponta a ponta pulam com aviso.
+
+## Painel (fase 2)
+
+A coleta grava os leads no Neon; o painel (`web/`, Next) lê as mesmas tabelas e mostra a fila do dia,
+a tela de cobrança, a lista de leads com filtros e as métricas de resposta por variante, nicho e dor.
+
+```bash
+cd web && npm run dev
+```
+
+Variáveis (em `web/.env.local`, symlink para o `.env` da raiz): `DATABASE_URL`, `AUTH_SECRET`,
+`DASHBOARD_USER`, `DASHBOARD_PASSWORD`.
