@@ -120,8 +120,8 @@ func (b *Banco) SomarCusto(ctx context.Context, dia time.Time, api string, unida
 
 func (b *Banco) MarcarPerdidos(ctx context.Context) (int64, error) {
 	tag, err := b.pool.Exec(ctx, `
-		update leads set etapa = 'perdido'
-		where etapa = 'contatado' and follow_up_em < now() - interval '3 days' and respondeu_em is null
+		update leads set etapa = 'perdido', saiu_de = etapa
+		where etapa in ('contatado', 'abriu') and follow_up_em < now() - interval '3 days' and respondeu_em is null
 	`)
 	if err != nil {
 		return 0, fmt.Errorf("banco: MarcarPerdidos: %w", err)

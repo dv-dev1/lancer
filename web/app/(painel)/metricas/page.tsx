@@ -10,8 +10,7 @@ export const metadata: Metadata = { title: 'Métricas' }
 export default async function Metricas() {
   const [etapas, saidas, leadsBrutos, [custo]] = await Promise.all([
     sql()`select etapa, count(*)::int as n from leads group by etapa`,
-    sql()`select case when respondeu_em is not null then 'respondeu' when contatado_em is not null then 'contatado'
-            else 'na_fila' end as degrau, count(*)::int as n
+    sql()`select coalesce(saiu_de, 'na_fila') as degrau, count(*)::int as n
           from leads where etapa in ('perdido', 'saiu') group by 1`,
     sql()`select variante, nicho, dores, contatado_em, respondeu_em from leads`,
     sql()`select coalesce(sum(usd), 0)::float as total from custos`,

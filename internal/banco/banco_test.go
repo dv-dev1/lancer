@@ -130,12 +130,14 @@ func TestMarcarPerdidosSoAposTresDiasSemResposta(t *testing.T) {
 
 	casos := []struct {
 		placeID     string
+		etapa       string
 		followUp    time.Time
 		comResposta bool
 	}{
-		{"perdido-1", agora.Add(-4 * 24 * time.Hour), false},  // 4 dias sem resposta: perde
-		{"recente-1", agora.Add(-1 * 24 * time.Hour), false},  // só 1 dia: continua contatado
-		{"respondeu-1", agora.Add(-4 * 24 * time.Hour), true}, // 4 dias mas respondeu: continua contatado
+		{"perdido-1", "contatado", agora.Add(-4 * 24 * time.Hour), false},  // 4 dias sem resposta: perde
+		{"abriu-1", "abriu", agora.Add(-4 * 24 * time.Hour), false},        // abriu o preview e não respondeu: perde
+		{"recente-1", "contatado", agora.Add(-1 * 24 * time.Hour), false},  // só 1 dia: continua contatado
+		{"respondeu-1", "contatado", agora.Add(-4 * 24 * time.Hour), true}, // 4 dias mas respondeu: continua contatado
 	}
 	for _, c := range casos {
 		if err := b.Gravar(ctx, []lead.Lead{leadTeste(c.placeID)}, nil); err != nil {
@@ -146,8 +148,8 @@ func TestMarcarPerdidosSoAposTresDiasSemResposta(t *testing.T) {
 			respondeuEm = agora
 		}
 		if _, err := b.pool.Exec(ctx,
-			"update leads set etapa = 'contatado', follow_up_em = $2, respondeu_em = $3 where place_id = $1",
-			c.placeID, c.followUp, respondeuEm); err != nil {
+			"update leads set etapa = $4, follow_up_em = $2, respondeu_em = $3 where place_id = $1",
+			c.placeID, c.followUp, respondeuEm, c.etapa); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -156,12 +158,12 @@ func TestMarcarPerdidosSoAposTresDiasSemResposta(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 1 {
-		t.Errorf("MarcarPerdidos = %d, want 1", n)
+	if n != 2 {
+		t.Errorf("MarcarPerdidos = %d, want 2", n)
 	}
 
-	linhas, err := b.pool.Query(ctx, "select place_id, etapa from leads where place_id = any($1)",
-		[]string{"perdido-1", "recente-1", "respondeu-1"})
+	linhas, err := b.pool.Query(ctx, "select place_id, etapa || coalesce('<-' || saiu_de, '') from leads where place_id = any($1)",
+		[]string{"perdido-1", "abriu-1", "recente-1", "respondeu-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +176,7 @@ func TestMarcarPerdidosSoAposTresDiasSemResposta(t *testing.T) {
 		}
 		etapas[id] = etapa
 	}
-	want := map[string]string{"perdido-1": "perdido", "recente-1": "contatado", "respondeu-1": "contatado"}
+	want := map[string]string{"perdido-1": "perdido<-contatado", "abriu-1": "perdido<-abriu", "recente-1": "contatado", "respondeu-1": "contatado"}
 	for id, w := range want {
 		if etapas[id] != w {
 			t.Errorf("etapa[%s] = %q, want %q", id, etapas[id], w)

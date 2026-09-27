@@ -111,8 +111,8 @@ func TestSlug(t *testing.T) {
 	if !strings.HasPrefix(got, "pao-de-acucar-cia-") {
 		t.Errorf("Slug(...) = %q, want prefix %q", got, "pao-de-acucar-cia-")
 	}
-	if !strings.HasSuffix(got, "-1234") {
-		t.Errorf("Slug(...) = %q, want suffix com os 4 últimos caracteres do ID", got)
+	if !strings.HasSuffix(got, "-CDEF1234") {
+		t.Errorf("Slug(...) = %q, want suffix com os 8 últimos caracteres do ID", got)
 	}
 }
 

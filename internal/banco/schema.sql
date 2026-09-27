@@ -20,8 +20,11 @@ create table if not exists leads (
     contatado_em timestamptz,
     follow_up_em timestamptz,
     respondeu_em timestamptz,
+    saiu_de text,
     criado_em timestamptz not null default now()
 );
+-- o create acima não acrescenta coluna em tabela que já existe.
+alter table leads add column if not exists saiu_de text;
 
 -- só descarte durável (fechado, sem celular, fora do porte, sem dor): descarte por erro não entra aqui e volta a ser tentado.
 create table if not exists vistos (

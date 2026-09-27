@@ -32,7 +32,8 @@ type Candidato = {
 export default async function Cobrar() {
   // A régua dos 3 dias é o deveCobrar, não o SQL: a query só traz quem ainda pode entrar nela.
   const candidatos = (await sql()`select id, nome, telefone, contatado_em, respondeu_em, follow_up_em from leads
-    where contatado_em is not null and respondeu_em is null and follow_up_em is null`) as Candidato[]
+    where etapa in ('contatado', 'abriu') and contatado_em is not null and respondeu_em is null
+      and follow_up_em is null`) as Candidato[]
   const agora = new Date()
   const leads = candidatos.filter((l) => deveCobrar(l, agora))
 

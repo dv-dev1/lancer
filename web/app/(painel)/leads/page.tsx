@@ -7,14 +7,17 @@ import { Cabecalho, Selo, SeloEtapa } from '../ui.tsx'
 export const dynamic = 'force-dynamic'
 export const metadata: Metadata = { title: 'Leads' }
 
-type Filtros = { nicho?: string; etapa?: string; variante?: string; dor?: string }
+type Filtro = string | string[] | undefined
+type Filtros = { nicho?: Filtro; etapa?: Filtro; variante?: Filtro; dor?: Filtro }
+
+const primeiro = (v: Filtro) => (Array.isArray(v) ? v[0] : v) || null
 
 export default async function Leads({ searchParams }: { searchParams: Promise<Filtros> }) {
   const f = await searchParams
-  const nicho = f.nicho || null
-  const etapa = f.etapa || null
-  const variante = f.variante || null
-  const dor = f.dor || null
+  const nicho = primeiro(f.nicho)
+  const etapa = primeiro(f.etapa)
+  const variante = primeiro(f.variante)
+  const dor = primeiro(f.dor)
   const [leads, nichos] = await Promise.all([
     sql()`select id, nome, nicho, bairro, etapa, variante, dores, pontuacao from leads
       where (${nicho}::text is null or nicho = ${nicho})

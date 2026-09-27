@@ -195,7 +195,8 @@ var acentos = strings.NewReplacer(
 	"Ç", "C", "Ñ", "N",
 )
 
-// os 4 últimos caracteres do PlaceID evitam colisão entre estabelecimentos de nome igual.
+// os 8 últimos caracteres do PlaceID evitam colisão entre estabelecimentos de nome igual; com 4, uma colisão
+// violava o unique do slug e desfazia o Gravar da rodada inteira, todo dia.
 func Slug(nome, placeID string) string {
 	s := strings.ToLower(acentos.Replace(nome))
 	var b strings.Builder
@@ -214,8 +215,8 @@ func Slug(nome, placeID string) string {
 	}
 	base := strings.TrimRight(b.String(), "-")
 	sufixo := placeID
-	if len(sufixo) > 4 {
-		sufixo = sufixo[len(sufixo)-4:]
+	if len(sufixo) > 8 {
+		sufixo = sufixo[len(sufixo)-8:]
 	}
 	return base + "-" + sufixo
 }
