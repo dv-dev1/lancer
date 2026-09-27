@@ -12,8 +12,8 @@ jobs:
       matrix:
         go-version: ["stable", "oldstable"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go-version }}
       # Ubuntu 23.10+ bloqueia via AppArmor os namespaces que o sandbox do Chrome usa; sem isto os testes do chromedp morrem com "No usable sandbox".
