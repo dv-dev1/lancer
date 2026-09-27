@@ -165,6 +165,13 @@ func TestGanchoValido(t *testing.T) {
 	}
 }
 
+func TestNomeDaPlataformaFallbackNaoVazaHost(t *testing.T) {
+	got := NomeDaPlataforma("https://algumsite-desconhecido.com.br/perfil")
+	if got != "um link de perfil" {
+		t.Errorf("NomeDaPlataforma fallback = %q, want %q", got, "um link de perfil")
+	}
+}
+
 func TestNomeDaPlataforma(t *testing.T) {
 	casos := []struct{ uri, want string }{
 		{"https://www.instagram.com/padoca", "Instagram"},
@@ -210,5 +217,29 @@ func TestGanchoPadrao(t *testing.T) {
 		if g == "" || !GanchoValido(g) {
 			t.Errorf("GanchoPadrao(%q, ...) = %q, want gancho válido e não vazio", d, g)
 		}
+	}
+}
+
+func TestGanchoPadraoDetalheInvalidoCaiNoGenerico(t *testing.T) {
+	casos := []string{
+		"tabela só no wa.me/5583999999999",
+		"cobra R$ 30 a mais que a concorrência",
+	}
+	for _, detalhe := range casos {
+		g := GanchoPadrao(Reclamacao, detalhe)
+		if !GanchoValido(g) {
+			t.Errorf("GanchoPadrao(Reclamacao, %q) = %q, want gancho válido", detalhe, g)
+		}
+		if strings.Contains(g, detalhe) {
+			t.Errorf("GanchoPadrao(Reclamacao, %q) = %q, não pode vazar o detalhe original", detalhe, g)
+		}
+	}
+}
+
+func TestGanchoPadraoNormalizaPontuacaoDoDetalhe(t *testing.T) {
+	g := GanchoPadrao(Reclamacao, "demora no atendimento.")
+	want := "vi um comentário sobre demora no atendimento nas avaliações"
+	if g != want {
+		t.Errorf("GanchoPadrao não normalizou a pontuação do detalhe: %q, want %q", g, want)
 	}
 }

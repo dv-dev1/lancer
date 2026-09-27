@@ -217,8 +217,19 @@ func montarMensagemUsuario(e Entrada) string {
 	return b.String()
 }
 
+// ErroStatus expõe o status HTTP pra quem chama distinguir chave revogada/cota (401/403/429) de
+// qualquer outro erro, sem parsear a mensagem.
+type ErroStatus struct {
+	Status int
+	corpo  string
+}
+
+func (e *ErroStatus) Error() string {
+	return fmt.Sprintf("llm: status %d: %s", e.Status, e.corpo)
+}
+
 // erroHTTP trunca em 200 bytes, igual ao cliente do Places.
 func erroHTTP(res *http.Response) error {
 	corpo, _ := io.ReadAll(io.LimitReader(res.Body, 200))
-	return fmt.Errorf("llm: status %d: %s", res.StatusCode, corpo)
+	return &ErroStatus{Status: res.StatusCode, corpo: string(corpo)}
 }

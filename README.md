@@ -8,29 +8,39 @@ Abrir o Google Maps num navegador automatizado foge dos termos de uso do Google 
 
 "Lancer" é o "free lance" original: o mercenário medieval que vendia a própria lança pra quem pagasse. A ferramenta faz o equivalente em prospecção — sai atrás de quem ainda não foi abordado.
 
-## Exemplo de saída (fictício)
+## Exemplo de saída (saída real, com nomes e telefones trocados)
 
-O comando abaixo roda a coleta de verdade. O bloco a seguir é **exemplo, com nomes e telefones trocados** — a primeira rodada real substitui isto aqui.
+O bloco abaixo é a saída de verdade da 3ª rodada de teste (bairro Tambaú), só com os nomes dos
+estabelecimentos e os telefones trocados por fictícios — dores, pontos, variante, mensagens,
+descartes e rodapé são exatamente como saíram.
 
 ```
-$ go run ./cmd/coleta --nicho confeitaria --bairro "Manaíra" --limite 2
+$ go run ./cmd/coleta --nicho confeitaria --bairro "Tambaú" --limite 3
 
-pontos  nome                    dores       nota (n)   variante  telefone
-65      Doceria Maria Doce      reclamacao  4.5 (100)  texto     5583999998888
-46      Doce Sabor Presente     sem_site    4.0 (30)   link      5583988887777
+pontos  nome                       dores           nota (n)  variante  telefone
+69      Doce Recanto - Tambaú      sem_site        4.6 (?)   texto     5583990001111
+65      Padaria Bela Vista         site_agregador  4.5 (?)   link      5583990002222
+65      Restaurante Sabor Caseiro  sem_site        4.5 (?)   texto     5583990003333
 
-[Doceria Maria Doce] doceria-maria-doce-a1b2
-oi, aqui é o Daniel. vi que vocês demoram bastante pra responder no whatsapp. faz sentido pra vocês? se não fizer sentido, é só me avisar que não mando mais nada.
+[Doce Recanto - Tambaú] doce-recanto-tambau-xVvM
+oi, aqui é o Daniel, desenvolvedor aqui de João Pessoa. vi que vocês não têm site, o que dificulta encontrar informações completas sobre os produtos. faz sentido pra vocês? se não fizer sentido, é só me avisar que não mando mais nada.
 
-[Doce Sabor Presente] doce-sabor-presente-c3d4
-oi, aqui é o Daniel. vi que ainda não tem site. faz sentido pra vocês? se não fizer sentido, é só me avisar que não mando mais nada. montei um exemplo rápido pra ver: <preview>/p/doce-sabor-presente-c3d4
+[Padaria Bela Vista] padaria-bela-vista-PPvE
+oi, aqui é o Daniel, desenvolvedor aqui de João Pessoa. vi que o cardápio está só no Instagram, e o cliente precisa abrir o app para ver. faz sentido pra vocês? se não fizer sentido, é só me avisar que não mando mais nada. montei um exemplo rápido pra ver: <preview>/p/padaria-bela-vista-PPvE
+
+[Restaurante Sabor Caseiro] restaurante-sabor-caseiro-ejTg
+oi, aqui é o Daniel, desenvolvedor aqui de João Pessoa. vi que vocês não têm site, e isso pode dificultar os clientes que buscam informações rápidas. faz sentido pra vocês? se não fizer sentido, é só me avisar que não mando mais nada.
 
 descartes:
-- Confeitaria Fechada: fechado
-- Confeitaria Sem Celular: sem celular
+- Doce Trufa - Tambaú: sem celular
+- Padaria Boa Vista Tambaú: sem celular
+- Doce Mel Confeitaria - João Pessoa | Bolos e Doces |: sem dor
+- Bela Vista Delicatessen & Panificadora: sem celular
+- Padaria Praiana - Padaria e Mini-Mercado: sem celular
+- Doce Amore: sem celular
 
-Maps: 2 buscas, 4 lugares abertos (grátis)
-conta: {TokensEntrada:150 TokensSaida:50} — teto US$ 0.13
+Maps: 2 buscas, 9 lugares abertos (grátis)
+conta: {TokensEntrada:1902 TokensSaida:99} — teto US$ 0.00
 ```
 
 Se o Google barrar a coleta com captcha, o comando para a rodada inteira com "Google pediu captcha — coleta parada; tente amanhã" — não adianta insistir no mesmo dia.
@@ -42,9 +52,13 @@ Se o Google barrar a coleta com captcha, o comando para a rodada inteira com "Go
 | `OPENAI_API_KEY` | sim | análise das avaliações (gpt-4.1-mini) |
 | `LANCER_REMETENTE` | sim | nome usado na abertura da mensagem |
 | `LANCER_PREVIEW_URL` | não | base do link de preview; vazio vira o placeholder `<preview>/p/<slug>` |
-| `PAGESPEED_API_KEY` | não | PageSpeed Insights; sem chave funciona no volume baixo da coleta diária |
+| `PAGESPEED_API_KEY` | não | PageSpeed Insights; ver abaixo |
 
 Faltando alguma obrigatória, o comando sai com erro nomeando qual falta.
+
+`PAGESPEED_API_KEY` é grátis e não pede cartão nem billing (basta ativar a API no Google Cloud Console).
+Sem ela, o PageSpeed costuma devolver 429 (limite de uso sem chave) e a checagem de lentidão simplesmente
+não roda pro lead — não é tratada como site ruim nem derruba a coleta, só fica sem esse dado.
 
 ## Rodar
 

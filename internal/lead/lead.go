@@ -77,11 +77,10 @@ func dominioDaPlataforma(host string) (string, bool) {
 
 // NomeDaPlataforma nunca devolve o host cru: a mensagem final não pode citar domínio.
 func NomeDaPlataforma(uri string) string {
-	host := hostDe(uri)
-	if d, ok := dominioDaPlataforma(host); ok {
+	if d, ok := dominioDaPlataforma(hostDe(uri)); ok {
 		return nomesPlataforma[d]
 	}
-	return host
+	return "um link de perfil"
 }
 
 func ClassificarSite(uri string) Dor {
@@ -245,7 +244,12 @@ func GanchoPadrao(d Dor, detalhe string) string {
 	case SiteRuim:
 		return "tentei abrir o site de vocês e não carregou direito"
 	case Reclamacao:
-		return "vi um comentário sobre " + detalhe + " nas avaliações"
+		detalhe = strings.TrimRight(detalhe, " .!?…")
+		if g := "vi um comentário sobre " + detalhe + " nas avaliações"; GanchoValido(g) {
+			return g
+		}
+		// detalhe veio da LLM e pode citar preço/link/host (ex.: "wa.me/…", "R$ 30"): não repassa.
+		return "vi algumas avaliações comentando sobre o atendimento"
 	default:
 		return detalhe
 	}

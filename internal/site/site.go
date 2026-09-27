@@ -40,6 +40,11 @@ func (c *Checador) Checar(ctx context.Context, alvo string) (ruim bool, motivo s
 		return true, "fora do ar"
 	}
 	defer res.Body.Close()
+	// bloqueio (login/rate limit) não é o site fora do ar — é indeterminado, não pune o lead.
+	switch res.StatusCode {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests:
+		return false, ""
+	}
 	if res.StatusCode >= 400 {
 		return true, "fora do ar"
 	}
@@ -67,7 +72,9 @@ func (c *Checador) notaPageSpeed(ctx context.Context, alvo string) (nota float64
 		"url":      {alvo},
 		"strategy": {"mobile"},
 		"category": {"performance"},
-		"key":      {c.Chave},
+	}
+	if c.Chave != "" {
+		consulta.Set("key", c.Chave)
 	}
 	destino := c.PageSpeedBase + "/pagespeedonline/v5/runPagespeed?" + consulta.Encode()
 	req, err := http.NewRequestWithContext(ctxPS, http.MethodGet, destino, nil)
@@ -87,7 +94,9 @@ func (c *Checador) notaPageSpeed(ctx context.Context, alvo string) (nota float64
 		LighthouseResult struct {
 			Categories struct {
 				Performance struct {
-					Score float64 `json:"score"`
+					// *float64: score ausente ou null (Lighthouse às vezes não roda a auditoria) não
+					// pode virar 0 e cair como "lento" — é indeterminado, não pune o lead.
+					Score *float64 `json:"score"`
 				} `json:"performance"`
 			} `json:"categories"`
 		} `json:"lighthouseResult"`
@@ -95,5 +104,9 @@ func (c *Checador) notaPageSpeed(ctx context.Context, alvo string) (nota float64
 	if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
 		return 0, false
 	}
-	return resp.LighthouseResult.Categories.Performance.Score, true
+	score := resp.LighthouseResult.Categories.Performance.Score
+	if score == nil {
+		return 0, false
+	}
+	return *score, true
 }

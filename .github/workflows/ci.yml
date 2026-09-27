@@ -20,3 +20,9 @@ jobs:
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: go vet ./...
       - run: go test ./...
+      # trava a promessa do README (nada pago, sem chave do Maps): quebra se alguém colar código
+      # do Places/Maps API ou do SDK oficial em vez do coletor headless de internal/maps.
+      - name: sem API paga do Google nem chave do Maps
+        run: |
+          ! grep -rnE "places\.googleapis\.com|maps\.googleapis\.com|GOOGLE_MAPS_API_KEY" --include='*.go' .
+          ! grep -E "cloud\.google\.com/go/maps|googlemaps" go.mod

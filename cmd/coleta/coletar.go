@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand/v2"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -56,11 +57,27 @@ type contagemMaps struct {
 	LugaresAbertos int
 }
 
-// erroSistemico devolve não-nil só pra falhas que abortam a coleta inteira (hoje, só captcha).
+// mensagemChaveOpenAIRecusada é o texto exato que a coleta mostra quando a OpenAI recusa a chave ou corta por cota.
+const mensagemChaveOpenAIRecusada = "OpenAI recusou a chave (status %d) — coleta parada; confira OPENAI_API_KEY"
+
+// erroSistemico devolve não-nil só pra falhas que abortam a coleta inteira: captcha, chave/cota da
+// OpenAI recusada (senão uma chave revogada gastaria dezenas de navegações no Maps até acabar a
+// lista) e o contexto pai já cancelado/expirado. Checa ctx.Err() do CHAMADOR, não de algum timeout
+// interno do internal/maps — aquele é só daquela chamada (R9) e não pode virar sistêmico aqui.
 // Qualquer outro erro de um lugar isolado vira descarte — não pode derrubar o resto da rodada.
-func erroSistemico(err error) error {
+func erroSistemico(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return fmt.Errorf("contexto da coleta cancelado ou expirado — coleta parada: %w", ctx.Err())
+	}
 	if errors.Is(err, maps.ErrCaptcha) {
 		return errors.New(mensagemCaptcha)
+	}
+	var erroLLM *llm.ErroStatus
+	if errors.As(err, &erroLLM) {
+		switch erroLLM.Status {
+		case http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests:
+			return fmt.Errorf(mensagemChaveOpenAIRecusada, erroLLM.Status)
+		}
 	}
 	return nil
 }
@@ -73,13 +90,13 @@ func coletar(ctx context.Context, mc *maps.Coletor, sc *site.Checador, lc *llm.C
 		return nil, nil, contagemMaps{}, fmt.Errorf("nicho %q inválido; use restaurante, confeitaria, loja ou servico", e.Nicho)
 	}
 
-	resultados, buscas, err := buscarDeduplicados(ctx, mc, termos, e.Bairro)
+	resultados, buscas, descartesBusca, err := buscarDeduplicados(ctx, mc, termos, e.Bairro)
 	if err != nil {
 		return nil, nil, contagemMaps{}, err
 	}
 
 	var leads []lead.Lead
-	var descartes []descarte
+	descartes := descartesBusca
 	qualificados := 0
 	abertos := 0
 	for _, res := range resultados {
@@ -90,7 +107,7 @@ func coletar(ctx context.Context, mc *maps.Coletor, sc *site.Checador, lc *llm.C
 		lugar, err := mc.Abrir(ctx, res.URL)
 		abertos++
 		if err != nil {
-			if sistemico := erroSistemico(err); sistemico != nil {
+			if sistemico := erroSistemico(ctx, err); sistemico != nil {
 				return nil, nil, contagemMaps{}, sistemico
 			}
 			// falha num lugar isolado (página fora do ar, blip de rede) não pode derrubar a coleta inteira.
@@ -110,7 +127,6 @@ func coletar(ctx context.Context, mc *maps.Coletor, sc *site.Checador, lc *llm.C
 			descartes = append(descartes, descarte{lugar.Nome, "fora do porte"})
 			continue
 		}
-		qualificados++
 
 		dores, detalhes, err := classificarESitear(ctx, sc, lugar)
 		if err != nil {
@@ -119,7 +135,7 @@ func coletar(ctx context.Context, mc *maps.Coletor, sc *site.Checador, lc *llm.C
 
 		resumo, negativas, err := mc.AvaliacoesDoAberto(ctx)
 		if err != nil {
-			if sistemico := erroSistemico(err); sistemico != nil {
+			if sistemico := erroSistemico(ctx, err); sistemico != nil {
 				return nil, nil, contagemMaps{}, sistemico
 			}
 			descartes = append(descartes, descarte{lugar.Nome, fmt.Sprintf("erro: %v", err)})
@@ -127,6 +143,9 @@ func coletar(ctx context.Context, mc *maps.Coletor, sc *site.Checador, lc *llm.C
 		}
 		saida, err := lc.Analisar(ctx, llm.Entrada{Nicho: e.Nicho, Dores: detalhes, Avaliacoes: montarAvaliacoes(resumo, negativas)})
 		if err != nil {
+			if sistemico := erroSistemico(ctx, err); sistemico != nil {
+				return nil, nil, contagemMaps{}, sistemico
+			}
 			descartes = append(descartes, descarte{lugar.Nome, fmt.Sprintf("erro: %v", err)})
 			continue
 		}
@@ -139,6 +158,9 @@ func coletar(ctx context.Context, mc *maps.Coletor, sc *site.Checador, lc *llm.C
 			descartes = append(descartes, descarte{lugar.Nome, "sem dor"})
 			continue
 		}
+		// --limite conta só quem chega até aqui com dor (R6): quem qualifica pelo porte mas não
+		// acha dor não pode consumir vaga do limite, senão a rodada para cedo demais.
+		qualificados++
 
 		gancho := saida.Gancho
 		if gancho == "" {
@@ -178,19 +200,22 @@ func montarAvaliacoes(resumo string, negativas []string) []string {
 	return append(avaliacoes, negativas...)
 }
 
-func buscarDeduplicados(ctx context.Context, mc *maps.Coletor, termos []string, bairro string) ([]maps.Resultado, int, error) {
+func buscarDeduplicados(ctx context.Context, mc *maps.Coletor, termos []string, bairro string) ([]maps.Resultado, int, []descarte, error) {
 	vistos := map[string]bool{}
 	var resultados []maps.Resultado
+	var descartes []descarte
 	buscas := 0
 	for _, termo := range termos {
 		consulta := fmt.Sprintf("%s em %s, João Pessoa - PB", termo, bairro)
 		encontrados, err := mc.Buscar(ctx, consulta, maxPorBusca)
 		buscas++
 		if err != nil {
-			if sistemico := erroSistemico(err); sistemico != nil {
-				return nil, buscas, sistemico
+			if sistemico := erroSistemico(ctx, err); sistemico != nil {
+				return nil, buscas, nil, sistemico
 			}
-			return nil, buscas, err
+			// erro isolado de um termo (blip de rede, página que não carregou) não aborta os demais.
+			descartes = append(descartes, descarte{termo, fmt.Sprintf("erro na busca: %v", err)})
+			continue
 		}
 		for _, res := range encontrados {
 			if !vistos[res.ID] {
@@ -199,7 +224,7 @@ func buscarDeduplicados(ctx context.Context, mc *maps.Coletor, termos []string, 
 			}
 		}
 	}
-	return resultados, buscas, nil
+	return resultados, buscas, descartes, nil
 }
 
 // classificarESitear aplica a dor de site (sem site, agregador, ou Checar no site próprio).

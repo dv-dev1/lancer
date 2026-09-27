@@ -176,7 +176,10 @@ func TestColetarFluxoCompleto(t *testing.T) {
 	defer openaiSrv.Close()
 
 	conta := &custo.Conta{}
-	ctx, cancelNovo := maps.Novo(context.Background())
+	ctx, cancelNovo, err := maps.Novo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer cancelNovo()
 	// mais folgado que antes: id-G (sem aba) come os 15s de timeout de produção do internal/maps.
 	ctx, cancelTimeout := context.WithTimeout(ctx, 150*time.Second)
@@ -335,7 +338,10 @@ func TestColetarCaptchaAborta(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	ctx, cancelNovo := maps.Novo(context.Background())
+	ctx, cancelNovo, err := maps.Novo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer cancelNovo()
 	ctx, cancelTimeout := context.WithTimeout(ctx, 30*time.Second)
 	defer cancelTimeout()
@@ -343,9 +349,210 @@ func TestColetarCaptchaAborta(t *testing.T) {
 	mc := &maps.Coletor{Base: srv.URL, Pausa: -1}
 	r := rand.New(rand.NewPCG(1, 2))
 
-	_, _, _, err := coletar(ctx, mc, nil, nil, r, entrada{Nicho: "confeitaria", Bairro: "Manaíra", Limite: 2, Remetente: "Daniel"})
+	_, _, _, err = coletar(ctx, mc, nil, nil, r, entrada{Nicho: "confeitaria", Bairro: "Manaíra", Limite: 2, Remetente: "Daniel"})
 	if err == nil || err.Error() != mensagemCaptcha {
 		t.Fatalf("coletar com captcha: err = %v, want %q", err, mensagemCaptcha)
+	}
+}
+
+// TestBuscarDeduplicadosToleraErroDeTermo cobre o R-fecho-1b: erro não sistêmico de um termo de
+// busca não aborta a rodada — usa "servico" (3 termos) porque dá espaço pra um termo com erro real
+// de navegação (redirect pra porta morta), um sem resultado e um normal, todos na mesma rodada.
+func TestBuscarDeduplicadosToleraErroDeTermo(t *testing.T) {
+	if !temChrome() {
+		t.Skip("Chrome/Chromium não encontrado, pulando teste com navegador real")
+	}
+
+	portaMorta := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	urlMorta := portaMorta.URL
+	portaMorta.Close()
+
+	feeds := map[string]string{
+		"barbearia em Manaíra, João Pessoa - PB": feedHTML(feedItem("id-J", "Barbearia Estilo")),
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/maps/search/", func(w http.ResponseWriter, r *http.Request) {
+		termo := strings.TrimPrefix(r.URL.Path, "/maps/search/")
+		switch termo {
+		case "salão de beleza em Manaíra, João Pessoa - PB":
+			http.Redirect(w, r, urlMorta, http.StatusFound) // erro real de navegação, não sistêmico
+		case "clínica de estética em Manaíra, João Pessoa - PB":
+			fmt.Fprint(w, `<html><body><span>Nenhum resultado</span></body></html>`) // sem feed nem lugar
+		default:
+			fmt.Fprint(w, feeds[termo])
+		}
+	})
+	mux.HandleFunc("/maps/place/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, paginaLugar("Barbearia Estilo", "4,5", "83999990000", "", false, true, [5]int{60, 20, 10, 7, 3}, "", nil))
+	})
+	mapsSrv := httptest.NewServer(mux)
+	defer mapsSrv.Close()
+
+	openaiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, respostaOpenAI(`{"reclamacao":"","gancho":""}`, 10, 5))
+	}))
+	defer openaiSrv.Close()
+
+	conta := &custo.Conta{}
+	ctx, cancelNovo, err := maps.Novo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancelNovo()
+	ctx, cancelTimeout := context.WithTimeout(ctx, 60*time.Second)
+	defer cancelTimeout()
+
+	mc := &maps.Coletor{Base: mapsSrv.URL, Pausa: -1}
+	sc := &site.Checador{HTTP: http.DefaultClient, NotaMinima: 0.5}
+	lc := &llm.Cliente{Chave: "chave-teste", Base: openaiSrv.URL, HTTP: openaiSrv.Client(), Conta: conta}
+	r := rand.New(rand.NewPCG(1, 2))
+
+	leads, descartes, cm, err := coletar(ctx, mc, sc, lc, r, entrada{
+		Nicho: "servico", Bairro: "Manaíra", Limite: 5, Remetente: "Daniel",
+	})
+	if err != nil {
+		t.Fatalf("coletar: %v, want nil (erro de termo não é sistêmico)", err)
+	}
+	if cm.Buscas != 3 {
+		t.Errorf("cm.Buscas = %d, want 3", cm.Buscas)
+	}
+	if len(leads) != 1 || leads[0].Nome != "Barbearia Estilo" {
+		t.Fatalf("leads = %+v, want 1 lead (Barbearia Estilo, do termo que não falhou)", leads)
+	}
+
+	achou := false
+	for _, d := range descartes {
+		if d.Nome == "salão de beleza" && strings.HasPrefix(d.Motivo, "erro na busca") {
+			achou = true
+		}
+	}
+	if !achou {
+		t.Errorf("descartes = %+v, want um descarte do termo \"salão de beleza\" com motivo \"erro na busca...\"", descartes)
+	}
+}
+
+// TestColetarLimiteContaSoLeadFinal cobre o R-fecho-6: --limite conta só quem sai com dor, não quem
+// passou no porte. id-X passa no porte (site próprio OK, sem reclamação) mas fica "sem dor" — não
+// pode contar pro limite, senão --limite 2 pararia cedo demais e devolveria só 1 lead.
+func TestColetarLimiteContaSoLeadFinal(t *testing.T) {
+	if !temChrome() {
+		t.Skip("Chrome/Chromium não encontrado, pulando teste com navegador real")
+	}
+
+	siteProprio := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer siteProprio.Close()
+	pageSpeed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"lighthouseResult":{"categories":{"performance":{"score":0.9}}}}`)
+	}))
+	defer pageSpeed.Close()
+
+	lugares := map[string]string{
+		"id-X": paginaLugar("Doceria X", "4,5", "83900000001", siteProprio.URL, false, true, [5]int{60, 20, 10, 7, 3}, "", nil),
+		"id-Y": paginaLugar("Doceria Y", "4,5", "83900000002", "", false, true, [5]int{60, 20, 10, 7, 3}, "", nil),
+		"id-Z": paginaLugar("Doceria Z", "4,5", "83900000003", "", false, true, [5]int{60, 20, 10, 7, 3}, "", nil),
+	}
+	feedTodos := feedHTML(feedItem("id-X", "Doceria X"), feedItem("id-Y", "Doceria Y"), feedItem("id-Z", "Doceria Z"))
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/maps/search/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, feedTodos) // os 2 termos de "confeitaria" devolvem os mesmos 3 — dedup cuida do resto
+	})
+	mux.HandleFunc("/maps/place/", func(w http.ResponseWriter, r *http.Request) {
+		for id, html := range lugares {
+			if strings.Contains(r.URL.Path, id) {
+				fmt.Fprint(w, html)
+				return
+			}
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	mapsSrv := httptest.NewServer(mux)
+	defer mapsSrv.Close()
+
+	openaiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, respostaOpenAI(`{"reclamacao":"","gancho":""}`, 10, 5))
+	}))
+	defer openaiSrv.Close()
+
+	conta := &custo.Conta{}
+	ctx, cancelNovo, err := maps.Novo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancelNovo()
+	ctx, cancelTimeout := context.WithTimeout(ctx, 60*time.Second)
+	defer cancelTimeout()
+
+	mc := &maps.Coletor{Base: mapsSrv.URL, Pausa: -1}
+	sc := &site.Checador{HTTP: siteProprio.Client(), PageSpeedBase: pageSpeed.URL, NotaMinima: 0.5}
+	lc := &llm.Cliente{Chave: "chave-teste", Base: openaiSrv.URL, HTTP: openaiSrv.Client(), Conta: conta}
+	r := rand.New(rand.NewPCG(1, 2))
+
+	leads, _, cm, err := coletar(ctx, mc, sc, lc, r, entrada{
+		Nicho: "confeitaria", Bairro: "Manaíra", Limite: 2, Remetente: "Daniel",
+	})
+	if err != nil {
+		t.Fatalf("coletar: %v", err)
+	}
+	if cm.LugaresAbertos != 3 {
+		t.Errorf("cm.LugaresAbertos = %d, want 3 (X, Y, Z — X não conta pro limite por sair sem dor)", cm.LugaresAbertos)
+	}
+	if len(leads) != 2 {
+		t.Fatalf("leads = %+v, want 2 (Y e Z; X qualificou pelo porte mas saiu sem dor)", leads)
+	}
+	for _, l := range leads {
+		if l.Nome == "Doceria X" {
+			t.Errorf("Doceria X não devia virar lead (sem dor): %+v", leads)
+		}
+	}
+}
+
+// TestColetarLLMAutenticacaoAborta cobre o R-fecho-5: 401/403/429 vindo da OpenAI é sistêmico —
+// aborta a rodada antes de gastar navegação no Maps com uma chave já revogada.
+func TestColetarLLMAutenticacaoAborta(t *testing.T) {
+	if !temChrome() {
+		t.Skip("Chrome/Chromium não encontrado, pulando teste com navegador real")
+	}
+
+	aberturas := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("/maps/search/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, feedHTML(feedItem("id-A", "Doceria A"), feedItem("id-B", "Doceria B")))
+	})
+	mux.HandleFunc("/maps/place/", func(w http.ResponseWriter, r *http.Request) {
+		aberturas++
+		fmt.Fprint(w, paginaLugar("Doceria A", "4,5", "83998765432", "", false, true, [5]int{60, 20, 10, 7, 3}, "", nil))
+	})
+	mapsSrv := httptest.NewServer(mux)
+	defer mapsSrv.Close()
+
+	openaiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"error":"invalid_api_key"}`)
+	}))
+	defer openaiSrv.Close()
+
+	conta := &custo.Conta{}
+	ctx, cancelNovo, err := maps.Novo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancelNovo()
+	ctx, cancelTimeout := context.WithTimeout(ctx, 60*time.Second)
+	defer cancelTimeout()
+
+	mc := &maps.Coletor{Base: mapsSrv.URL, Pausa: -1}
+	lc := &llm.Cliente{Chave: "chave-invalida", Base: openaiSrv.URL, HTTP: openaiSrv.Client(), Conta: conta}
+	r := rand.New(rand.NewPCG(1, 2))
+
+	_, _, _, err = coletar(ctx, mc, nil, lc, r, entrada{Nicho: "confeitaria", Bairro: "Manaíra", Limite: 5, Remetente: "Daniel"})
+	if err == nil || !strings.HasPrefix(err.Error(), "OpenAI recusou a chave") {
+		t.Fatalf("coletar com LLM 401: err = %v, want prefixo %q", err, "OpenAI recusou a chave")
+	}
+	if aberturas != 1 {
+		t.Errorf("aberturas = %d, want 1 (aborta antes de abrir o 2º lugar)", aberturas)
 	}
 }
 

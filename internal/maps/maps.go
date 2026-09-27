@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/chromedp/chromedp"
@@ -13,16 +14,19 @@ import (
 
 var ErrCaptcha = errors.New("maps: captcha")
 
-// BaseGoogleMaps é o Base de produção; os testes apontam Coletor.Base para um httptest.
 const BaseGoogleMaps = "https://www.google.com"
 
-// PausaPadrao é o valor recomendado pra Coletor.Pausa fora de teste.
 const PausaPadrao = 3 * time.Second
 
 // timeoutElemento teta WaitVisible/Click pra nunca travar pra sempre; subir o valor não reduz a
 // falha na aba Avaliações (round 2: falha o teto inteiro, não uns segundos a mais — seletor
 // ausente, não lentidão). var, não const: o teste da fixture "sem aba" encolhe isso.
 var timeoutElemento = 15 * time.Second
+
+// timeoutChamada teta a função inteira (Buscar/Abrir/AvaliacoesDoAberto), não só waits/clicks: o
+// ctx de main.go não tem deadline própria, então sem isso um Navigate/Evaluate que nunca responde
+// trava a rodada pra sempre. var: o teste de prazo encolhido usa isso.
+var timeoutChamada = 60 * time.Second
 
 // esperarClicar roda uma ação de espera/clique com teto próprio, sem depender do contexto do chamador ter deadline.
 func esperarClicar(ctx context.Context, acao chromedp.Action) error {
@@ -77,15 +81,21 @@ func pausar(base time.Duration) time.Duration {
 	return base + time.Duration(rand.Int64N(int64(time.Second)))
 }
 
-// Novo aloca um Chrome headless com uma única aba, em pt-BR.
-func Novo(ctx context.Context) (context.Context, context.CancelFunc) {
+func Novo(ctx context.Context) (context.Context, context.CancelFunc, error) {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.Flag("lang", "pt-BR"))
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(ctx, opts...)
 	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
-	return browserCtx, func() {
+	cancelar := func() {
 		cancelBrowser()
 		cancelAlloc()
 	}
+	// aloca o browser aqui, sem timeout: se a 1ª chamada de chromedp.Run fosse a de Buscar/Abrir, o
+	// fim do timeoutChamada dela derrubaria o browser inteiro (doc do Run).
+	if err := chromedp.Run(browserCtx); err != nil {
+		cancelar()
+		return nil, nil, fmt.Errorf("maps: não consegui abrir o Chrome: %w", err)
+	}
+	return browserCtx, cancelar, nil
 }
 
 func (c *Coletor) checarCaptcha(ctx context.Context) (bool, error) {
@@ -106,6 +116,9 @@ type resultadoBruto struct {
 
 // Buscar rola o feed até ter max resultados ou até ele parar de crescer duas vezes seguidas.
 func (c *Coletor) Buscar(ctx context.Context, consulta string, max int) ([]Resultado, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeoutChamada)
+	defer cancel()
+
 	if p := pausar(c.Pausa); p > 0 {
 		if err := chromedp.Run(ctx, chromedp.Sleep(p)); err != nil {
 			return nil, err
@@ -122,7 +135,9 @@ func (c *Coletor) Buscar(ctx context.Context, consulta string, max int) ([]Resul
 		return nil, ErrCaptcha
 	}
 	if err := esperarClicar(ctx, chromedp.WaitVisible(selFeed, chromedp.ByQuery)); err != nil {
-		return nil, err
+		// sem feed: às vezes o Maps pula direto pro lugar (resultado único), às vezes é "nenhum
+		// resultado" — nenhum dos dois é falha nossa, então não propaga o erro do WaitVisible.
+		return c.resultadoUnicoOuVazio(ctx)
 	}
 
 	anterior, paradas := 0, 0
@@ -173,6 +188,23 @@ func (c *Coletor) Buscar(ctx context.Context, consulta string, max int) ([]Resul
 	return resultados, nil
 }
 
+// resultadoUnicoOuVazio: página de lugar vira resultado único; qualquer outra coisa é "nenhum resultado", não erro.
+func (c *Coletor) resultadoUnicoOuVazio(ctx context.Context) ([]Resultado, error) {
+	var urlAtual string
+	if err := chromedp.Run(ctx, chromedp.Location(&urlAtual)); err != nil {
+		return nil, err
+	}
+	id := idDoLink(urlAtual)
+	if id == "" || !strings.Contains(urlAtual, "/maps/place/") {
+		return nil, nil
+	}
+	var nome string
+	if err := esperarClicar(ctx, chromedp.Text(selH1, &nome, chromedp.ByQuery)); err != nil {
+		return nil, nil // h1 não carregou a tempo: trata como sem resultado, não como erro do lugar
+	}
+	return []Resultado{{ID: id, Nome: nome, URL: urlAtual}}, nil
+}
+
 func resolverURL(base *url.URL, href string) string {
 	ref, err := url.Parse(href)
 	if err != nil || base == nil {
@@ -194,6 +226,9 @@ type lugarBruto struct {
 // não aparecer no teto, não é falha do lugar: devolve Avaliacoes -1 (R12), sem erro — por isso
 // AvaliacoesDoAberto, chamada logo depois, não clica de novo.
 func (c *Coletor) Abrir(ctx context.Context, destino string) (Lugar, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeoutChamada)
+	defer cancel()
+
 	if p := pausar(c.Pausa); p > 0 {
 		if err := chromedp.Run(ctx, chromedp.Sleep(p)); err != nil {
 			return Lugar{}, err
@@ -264,11 +299,13 @@ type avaliacaoBruta struct {
 	Texto    string `json:"texto"`
 }
 
-// AvaliacoesDoAberto exige que Abrir tenha sido chamada logo antes pro mesmo lugar: é o Abrir que
-// clica na aba Avaliações (precisa do histograma de lá pra contar avaliações), então aqui não
-// clica de novo. Rola o painel de avaliações 3 vezes: o número de itens carregados por rolagem
-// varia e não vale a pena medir crescimento aqui.
+// AvaliacoesDoAberto exige que Abrir tenha sido chamada logo antes: é o Abrir que clica na aba.
+// ponytail: rola 3x fixo em vez de medir crescimento; teto — lugar com muitas avaliações positivas
+// pode não juntar as 10 negativas. Melhorar rolando até parar de crescer, como o loop de Buscar.
 func (c *Coletor) AvaliacoesDoAberto(ctx context.Context) (string, []string, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeoutChamada)
+	defer cancel()
+
 	var resumo string
 	if err := chromedp.Run(ctx, chromedp.Evaluate(jsResumoGemini, &resumo)); err != nil {
 		return "", nil, err

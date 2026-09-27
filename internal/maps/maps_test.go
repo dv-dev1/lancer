@@ -137,7 +137,10 @@ func TestColetorComFixture(t *testing.T) {
 	srv := novoServidorFixture()
 	defer srv.Close()
 
-	ctx, cancelNovo := Novo(context.Background())
+	ctx, cancelNovo, err := Novo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer cancelNovo()
 	ctx, cancelTimeout := context.WithTimeout(ctx, 60*time.Second)
 	defer cancelTimeout()
@@ -282,6 +285,105 @@ func TestTimingsRestauradosAposFixture(t *testing.T) {
 	}
 }
 
+// TestBuscarSemFeed cobre o R-fecho-1: quando o feed não aparece, Buscar não é mais erro fatal —
+// só captcha e falha de navegação continuam sendo. "unico" simula o Maps redirecionando direto pro
+// lugar (resultado único); "nada" simula busca sem nenhum resultado.
+func TestBuscarSemFeed(t *testing.T) {
+	if !temChrome() {
+		t.Skip("Chrome/Chromium não encontrado, pulando teste com navegador real")
+	}
+
+	timeoutOrig := timeoutElemento
+	t.Cleanup(func() { timeoutElemento = timeoutOrig })
+	timeoutElemento = 300 * time.Millisecond // sem isso, esperar o feed sumir levaria os 15s de produção
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/maps/search/nada", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`<html><body><span>Nenhum resultado encontrado</span></body></html>`))
+	})
+	mux.HandleFunc("/maps/search/unico", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/maps/place/x/data=!19sChIJunico1", http.StatusFound)
+	})
+	mux.HandleFunc("/maps/place/", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(paginaLugar(true, true)))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	ctx, cancelNovo, err := Novo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancelNovo()
+	ctx, cancelTimeout := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelTimeout()
+
+	c := &Coletor{Base: srv.URL, Pausa: -1}
+
+	t.Run("sem resultado nao e erro", func(t *testing.T) {
+		resultados, err := c.Buscar(ctx, "nada", 5)
+		if err != nil {
+			t.Fatalf("Buscar sem resultado: err = %v, want nil", err)
+		}
+		if len(resultados) != 0 {
+			t.Errorf("resultados = %v, want vazio", resultados)
+		}
+	})
+
+	t.Run("redireciona pra lugar unico", func(t *testing.T) {
+		resultados, err := c.Buscar(ctx, "unico", 5)
+		if err != nil {
+			t.Fatalf("Buscar redirecionado: err = %v, want nil", err)
+		}
+		if len(resultados) != 1 {
+			t.Fatalf("resultados = %v, want 1 lugar único", resultados)
+		}
+		if resultados[0].ID != "ChIJunico1" {
+			t.Errorf("ID = %q, want ChIJunico1", resultados[0].ID)
+		}
+		if resultados[0].Nome != "Confeitaria Teste" {
+			t.Errorf("Nome = %q, want %q", resultados[0].Nome, "Confeitaria Teste")
+		}
+		if resultados[0].URL == "" {
+			t.Errorf("URL vazia")
+		}
+	})
+}
+
+// TestAbrirComPrazoEncolhido cobre o R-fecho-9: Abrir roda com o próprio teto (timeoutChamada), não
+// só as esperas internas — uma página que nunca responde não pode travar a rodada inteira.
+func TestAbrirComPrazoEncolhido(t *testing.T) {
+	if !temChrome() {
+		t.Skip("Chrome/Chromium não encontrado, pulando teste com navegador real")
+	}
+
+	timeoutOrig := timeoutChamada
+	t.Cleanup(func() { timeoutChamada = timeoutOrig })
+	timeoutChamada = 300 * time.Millisecond
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/maps/place/", func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(2 * time.Second) // além do prazo encolhido
+		w.Write([]byte(paginaLugar(true, true)))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	ctx, cancelNovo, err := Novo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancelNovo()
+	ctx, cancelTimeout := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelTimeout()
+
+	c := &Coletor{Base: srv.URL, Pausa: -1}
+	_, err = c.Abrir(ctx, srv.URL+"/maps/place/x/data=!19sChIJlento")
+	if err == nil {
+		t.Fatal("Abrir com página lenta devia devolver erro de prazo, veio nil")
+	}
+}
+
 // TestMapsAoVivo é a checagem rápida pra quando o Google mudar o layout; só roda sob pedido
 // porque bate no Google Maps real (fora dos termos de uso, sujeito a captcha).
 func TestMapsAoVivo(t *testing.T) {
@@ -289,7 +391,10 @@ func TestMapsAoVivo(t *testing.T) {
 		t.Skip("defina LANCER_MAPS_AO_VIVO=1 pra rodar contra o Google Maps real")
 	}
 
-	ctx, cancelNovo := Novo(context.Background())
+	ctx, cancelNovo, err := Novo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer cancelNovo()
 	ctx, cancelTimeout := context.WithTimeout(ctx, 60*time.Second)
 	defer cancelTimeout()

@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -210,6 +211,30 @@ func TestAnalisarDuasInvalidasDevolveVazio(t *testing.T) {
 	}
 	if saida.Gancho != "" {
 		t.Errorf("Gancho = %q, want vazio após 2 tentativas inválidas", saida.Gancho)
+	}
+}
+
+// TestErroStatusExpoeCodigo cobre o R-fecho-5: cmd/coleta precisa distinguir 401/403/429 (chave
+// revogada/cota) de qualquer outro erro HTTP pra abortar a rodada, sem parsear a string do erro.
+func TestErroStatusExpoeCodigo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"error":"invalid_api_key"}`)
+	}))
+	defer srv.Close()
+
+	conta := &custo.Conta{}
+	c := &Cliente{Chave: "chave-invalida", Base: srv.URL, HTTP: srv.Client(), Conta: conta}
+	_, err := c.Analisar(context.Background(), Entrada{Nicho: "loja"})
+	if err == nil {
+		t.Fatal("esperava erro no 401")
+	}
+	var erroStatus *ErroStatus
+	if !errors.As(err, &erroStatus) {
+		t.Fatalf("err = %v (%T), want dar errors.As pra *ErroStatus", err, err)
+	}
+	if erroStatus.Status != http.StatusUnauthorized {
+		t.Errorf("Status = %d, want 401", erroStatus.Status)
 	}
 }
 
