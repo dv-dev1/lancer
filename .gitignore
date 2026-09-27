@@ -4,3 +4,5 @@
 .superpowers/
 web/node_modules/
 web/.next/
+.env.local
+*.tsbuildinfo
