@@ -34,6 +34,7 @@ type Lead struct {
 	Bairro     string
 	Telefone   string
 	Site       string
+	Endereco   string
 	Nota       float64
 	Avaliacoes int
 	Dores      []Dor

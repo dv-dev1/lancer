@@ -44,17 +44,20 @@ type entrada struct {
 	Limite     int
 	Remetente  string
 	PreviewURL string
+	JaVistos   func(context.Context, []string) (map[string]bool, error) // nil = nada pulado (fase 1, sem banco)
 }
 
+// PlaceID só vem preenchido nos motivos duráveis (fechado, sem celular, fora do porte, sem dor): é
+// o que decide quem banco.Gravar manda pra "vistos", pra nunca mais reabrir.
 type descarte struct {
-	Nome   string
-	Motivo string
+	Nome, Motivo, PlaceID string
 }
 
 // contagemMaps registra o uso do Maps: é grátis (navegador, sem API paga), mas ainda vale mostrar na saída.
 type contagemMaps struct {
 	Buscas         int
 	LugaresAbertos int
+	JaVistos       int
 }
 
 // mensagemChaveOpenAIRecusada é o texto exato que a coleta mostra quando a OpenAI recusa a chave ou corta por cota.
@@ -95,6 +98,11 @@ func coletar(ctx context.Context, mc *maps.Coletor, sc *site.Checador, lc *llm.C
 		return nil, nil, contagemMaps{}, err
 	}
 
+	resultados, jaVistos, err := filtrarJaVistos(ctx, e.JaVistos, resultados)
+	if err != nil {
+		return nil, nil, contagemMaps{}, err
+	}
+
 	var leads []lead.Lead
 	descartes := descartesBusca
 	qualificados := 0
@@ -111,20 +119,20 @@ func coletar(ctx context.Context, mc *maps.Coletor, sc *site.Checador, lc *llm.C
 				return nil, nil, contagemMaps{}, sistemico
 			}
 			// falha num lugar isolado (página fora do ar, blip de rede) não pode derrubar a coleta inteira.
-			descartes = append(descartes, descarte{res.Nome, fmt.Sprintf("erro: %v", err)})
+			descartes = append(descartes, descarte{Nome: res.Nome, Motivo: fmt.Sprintf("erro: %v", err)})
 			continue
 		}
 		if lugar.Fechado {
-			descartes = append(descartes, descarte{lugar.Nome, "fechado"})
+			descartes = append(descartes, descarte{Nome: lugar.Nome, Motivo: "fechado", PlaceID: res.ID})
 			continue
 		}
 		celular, ok := lead.Celular(lugar.Telefone)
 		if !ok {
-			descartes = append(descartes, descarte{lugar.Nome, "sem celular"})
+			descartes = append(descartes, descarte{Nome: lugar.Nome, Motivo: "sem celular", PlaceID: res.ID})
 			continue
 		}
 		if !lead.PortePadrao.Passa(lugar.Nota, lugar.Avaliacoes) {
-			descartes = append(descartes, descarte{lugar.Nome, "fora do porte"})
+			descartes = append(descartes, descarte{Nome: lugar.Nome, Motivo: "fora do porte", PlaceID: res.ID})
 			continue
 		}
 
@@ -138,7 +146,7 @@ func coletar(ctx context.Context, mc *maps.Coletor, sc *site.Checador, lc *llm.C
 			if sistemico := erroSistemico(ctx, err); sistemico != nil {
 				return nil, nil, contagemMaps{}, sistemico
 			}
-			descartes = append(descartes, descarte{lugar.Nome, fmt.Sprintf("erro: %v", err)})
+			descartes = append(descartes, descarte{Nome: lugar.Nome, Motivo: fmt.Sprintf("erro: %v", err)})
 			continue
 		}
 		saida, err := lc.Analisar(ctx, llm.Entrada{Nicho: e.Nicho, Dores: detalhes, Avaliacoes: montarAvaliacoes(resumo, negativas)})
@@ -146,7 +154,7 @@ func coletar(ctx context.Context, mc *maps.Coletor, sc *site.Checador, lc *llm.C
 			if sistemico := erroSistemico(ctx, err); sistemico != nil {
 				return nil, nil, contagemMaps{}, sistemico
 			}
-			descartes = append(descartes, descarte{lugar.Nome, fmt.Sprintf("erro: %v", err)})
+			descartes = append(descartes, descarte{Nome: lugar.Nome, Motivo: fmt.Sprintf("erro: %v", err)})
 			continue
 		}
 		if saida.Reclamacao != "" {
@@ -155,7 +163,7 @@ func coletar(ctx context.Context, mc *maps.Coletor, sc *site.Checador, lc *llm.C
 		}
 
 		if len(dores) == 0 {
-			descartes = append(descartes, descarte{lugar.Nome, "sem dor"})
+			descartes = append(descartes, descarte{Nome: lugar.Nome, Motivo: "sem dor", PlaceID: res.ID})
 			continue
 		}
 		// --limite conta só quem chega até aqui com dor (R6): quem qualifica pelo porte mas não
@@ -169,12 +177,14 @@ func coletar(ctx context.Context, mc *maps.Coletor, sc *site.Checador, lc *llm.C
 		}
 
 		l := lead.Lead{
-			PlaceID:    lugar.ID,
+			// res.ID (da busca) é a chave do dedupe; lugar.ID vem da URL após navegar e pode divergir.
+			PlaceID:    res.ID,
 			Nome:       lugar.Nome,
 			Nicho:      e.Nicho,
 			Bairro:     e.Bairro,
 			Telefone:   celular,
 			Site:       lugar.Site,
+			Endereco:   lugar.Endereco,
 			Nota:       lugar.Nota,
 			Avaliacoes: lugar.Avaliacoes,
 			Dores:      dores,
@@ -188,7 +198,32 @@ func coletar(ctx context.Context, mc *maps.Coletor, sc *site.Checador, lc *llm.C
 	}
 
 	sort.Slice(leads, func(i, j int) bool { return leads[i].Pontuacao > leads[j].Pontuacao })
-	return leads, descartes, contagemMaps{Buscas: buscas, LugaresAbertos: abertos}, nil
+	return leads, descartes, contagemMaps{Buscas: buscas, LugaresAbertos: abertos, JaVistos: jaVistos}, nil
+}
+
+// filtrarJaVistos roda antes de qualquer mc.Abrir: quem já foi visto não custa navegação nenhuma.
+func filtrarJaVistos(ctx context.Context, jaVistos func(context.Context, []string) (map[string]bool, error), resultados []maps.Resultado) ([]maps.Resultado, int, error) {
+	if jaVistos == nil || len(resultados) == 0 {
+		return resultados, 0, nil
+	}
+	ids := make([]string, len(resultados))
+	for i, res := range resultados {
+		ids[i] = res.ID
+	}
+	vistos, err := jaVistos(ctx, ids)
+	if err != nil {
+		return nil, 0, err
+	}
+	var restantes []maps.Resultado
+	pulados := 0
+	for _, res := range resultados {
+		if vistos[res.ID] {
+			pulados++
+			continue
+		}
+		restantes = append(restantes, res)
+	}
+	return restantes, pulados, nil
 }
 
 // montarAvaliacoes é o que a LLM lê: o resumo do Gemini (quando existe) na frente das negativas.
@@ -214,7 +249,7 @@ func buscarDeduplicados(ctx context.Context, mc *maps.Coletor, termos []string, 
 				return nil, buscas, nil, sistemico
 			}
 			// erro isolado de um termo (blip de rede, página que não carregou) não aborta os demais.
-			descartes = append(descartes, descarte{termo, fmt.Sprintf("erro na busca: %v", err)})
+			descartes = append(descartes, descarte{Nome: termo, Motivo: fmt.Sprintf("erro na busca: %v", err)})
 			continue
 		}
 		for _, res := range encontrados {
@@ -291,6 +326,7 @@ func imprimir(w io.Writer, leads []lead.Lead, descartes []descarte, conta custo.
 	}
 
 	fmt.Fprintf(w, "\nMaps: %d buscas, %d lugares abertos (grátis)\n", cm.Buscas, cm.LugaresAbertos)
+	fmt.Fprintf(w, "já vistos: %d\n", cm.JaVistos)
 	fmt.Fprintf(w, "conta: %+v — teto US$ %.2f\n", conta, conta.Teto())
 }
 

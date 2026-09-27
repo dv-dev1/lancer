@@ -556,6 +556,76 @@ func TestColetarLLMAutenticacaoAborta(t *testing.T) {
 	}
 }
 
+// TestColetarJaVistosPulaAbrir cobre a T6: quem o banco já viu não gasta mc.Abrir nenhum.
+func TestColetarJaVistosPulaAbrir(t *testing.T) {
+	if !temChrome() {
+		t.Skip("Chrome/Chromium não encontrado, pulando teste com navegador real")
+	}
+
+	aberturas := map[string]int{}
+	lugares := map[string]string{
+		"id-A": paginaLugar("Doceria A", "4,5", "83998765432", "", false, true, [5]int{60, 20, 10, 7, 3}, "", nil),
+		"id-B": paginaLugar("Doceria B", "4,5", "83998765433", "", false, true, [5]int{60, 20, 10, 7, 3}, "", nil),
+	}
+	feedTodos := feedHTML(feedItem("id-A", "Doceria A"), feedItem("id-B", "Doceria B"))
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/maps/search/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, feedTodos) // os 2 termos de "confeitaria" devolvem os mesmos 2 — dedup cuida do resto
+	})
+	mux.HandleFunc("/maps/place/", func(w http.ResponseWriter, r *http.Request) {
+		for id, html := range lugares {
+			if strings.Contains(r.URL.Path, id) {
+				aberturas[id]++
+				fmt.Fprint(w, html)
+				return
+			}
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	mapsSrv := httptest.NewServer(mux)
+	defer mapsSrv.Close()
+
+	openaiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, respostaOpenAI(`{"reclamacao":"","gancho":""}`, 10, 5))
+	}))
+	defer openaiSrv.Close()
+
+	conta := &custo.Conta{}
+	ctx, cancelNovo, err := maps.Novo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancelNovo()
+	ctx, cancelTimeout := context.WithTimeout(ctx, 60*time.Second)
+	defer cancelTimeout()
+
+	mc := &maps.Coletor{Base: mapsSrv.URL, Pausa: -1}
+	sc := &site.Checador{HTTP: http.DefaultClient, NotaMinima: 0.5}
+	lc := &llm.Cliente{Chave: "chave-teste", Base: openaiSrv.URL, HTTP: openaiSrv.Client(), Conta: conta}
+	r := rand.New(rand.NewPCG(1, 2))
+
+	fakeJaVistos := func(ctx context.Context, ids []string) (map[string]bool, error) {
+		return map[string]bool{"id-A": true}, nil
+	}
+
+	leads, _, cm, err := coletar(ctx, mc, sc, lc, r, entrada{
+		Nicho: "confeitaria", Bairro: "Manaíra", Limite: 5, Remetente: "Daniel", JaVistos: fakeJaVistos,
+	})
+	if err != nil {
+		t.Fatalf("coletar: %v", err)
+	}
+	if aberturas["id-A"] != 0 {
+		t.Errorf("aberturas[id-A] = %d, want 0 (JaVistos devia ter pulado antes do Abrir)", aberturas["id-A"])
+	}
+	if cm.JaVistos != 1 {
+		t.Errorf("cm.JaVistos = %d, want 1", cm.JaVistos)
+	}
+	if len(leads) != 1 || leads[0].Nome != "Doceria B" {
+		t.Fatalf("leads = %+v, want só Doceria B (id-A foi pulado por JaVistos)", leads)
+	}
+}
+
 func TestDorPrincipal(t *testing.T) {
 	casos := []struct {
 		dores []lead.Dor
